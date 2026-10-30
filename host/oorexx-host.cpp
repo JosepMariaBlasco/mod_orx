@@ -21,7 +21,8 @@
  *   - A child exits after --max-requests connections (the master replaces
  *     it): .environment is process-global and survives instances, so this
  *     bounds what a program can leak to later ones.
- *   - Phases: content (a CGI program), and the hooks authn, authz and log.
+ *   - Phases: content (a CGI program, or a program written for mod_rexx:
+ *     the modrexx class, below), and the hooks authn, authz and log.
  *     A hook program gets the CGI environment, its arguments (ARGS), and
  *     returns a value that the module reads as its verdict. Its output has
  *     no client to go to, so it goes to the error log, like .error.
@@ -72,6 +73,8 @@
 
 #include <string>
 #include <vector>
+#include <map>
+#include <strings.h>
 
 extern "C" {
 #include "../include/oorexx_protocol.h"
@@ -117,7 +120,11 @@ static void send_log(int level, const char *msg, size_t n)
  * RexxHTTP invariant 3). A response written in one go reaches EOF within
  * the window, is never flushed, and Apache can give it a Content-Length.
  * It ends at EOF, when the stream and our copy are closed.                 */
+/* A modrexx program is never flushed: mod_rexx had no way to, and Apache  */
+/* holds a small response until the end, where what the program returns    */
+/* can still change its status.                                             */
 #define QUIET_MS 10
+static bool g_quiet_flush = true;
 static void *output_pump(void *arg)
 {
     int rfd = (int)(intptr_t)arg;
@@ -126,8 +133,11 @@ static void *output_pump(void *arg)
         ssize_t n = read(rfd, buf, sizeof buf);
         if (n < 0 && errno == EINTR) continue;
         if (n <= 0) break;
-        struct pollfd pf = { rfd, POLLIN, 0 };
-        int more = poll(&pf, 1, QUIET_MS) > 0;
+        int more = 1;
+        if (g_quiet_flush) {
+            struct pollfd pf = { rfd, POLLIN, 0 };
+            more = poll(&pf, 1, QUIET_MS) > 0;
+        }
         send_frame(OORX_DATA, more ? 0 : OORX_FLAG_FLUSH, buf, (uint32_t)n);
     }
     close(rfd);
@@ -322,6 +332,429 @@ static bool wd_disarm(void)
 }
 
 /* ------------------------------------------------------------------------ */
+/* The modrexx class: programs written for mod_rexx.                        */
+/*                                                                          */
+/* The module sends a snapshot of the request (keys in mod_orx.c). The     */
+/* program gets, instead of mod_rexx's request pointer, an opaque handle    */
+/* ("orx:" and 16 hex digits); WWWReqRecServer and WWWReqRecConnection      */
+/* give two more. The instance has two context exits: RXINI sets the        */
+/* initial variables before the program's first line, and RXOFNC answers    */
+/* the WWW* functions, which are called without being declared, as they    */
+/* were under mod_rexx (internal routines and built-ins still come first). */
+/* A read answers from the snapshot; a write changes the snapshot (so a     */
+/* later read sees it) and goes to the module as an UPDATE, which applies   */
+/* it to the request. A handle that is not one of this phase's, or a wrong  */
+/* number of arguments, is Error 40 in the program (mod_rexx crashed the    */
+/* worker on a bad pointer).                                                */
+/*                                                                          */
+/* Behaviour measured against mod_rexx 2.4.0, function by function.        */
+/* Not yet: subrequests (WWWSub_Req_Lookup_URI, WWWSub_Req_Lookup_File,     */
+/* WWWRun_Sub_Req) and WWWReqRecNext, WWWReqRecPrev, WWWReqRecMain; a call  */
+/* to one of them is "routine not found".                                   */
+/* ------------------------------------------------------------------------ */
+
+#define MODREXX_VERSION "Mod_Rexx/2.4.0"
+#define M_GET  0                    /* Apache's method numbers */
+#define M_POST 2
+
+/* Case-insensitive keys, as in Apache's tables.                            */
+struct nocase {
+    bool operator()(const std::string &a, const std::string &b) const
+    { return strcasecmp(a.c_str(), b.c_str()) < 0; }
+};
+typedef std::map<std::string, std::string, nocase> table;
+
+static struct {
+    bool armed;                     /* the program is running             */
+    std::string rh, sh, ch;         /* the handles                        */
+    std::vector<std::pair<std::string, std::string> > init;   /* v: */
+    std::map<std::string, std::string> r, s, c;               /* fields */
+    table in, env, notes, err;      /* headers_in, subprocess_env, ...    */
+} g_mr;
+
+static std::string new_handle(void)
+{
+    unsigned char b[8];
+    FILE *f = fopen("/dev/urandom", "rb");
+    if (!f || fread(b, 1, sizeof b, f) != sizeof b) {
+        for (size_t i = 0; i < sizeof b; i++) b[i] = (unsigned char)rand();
+    }
+    if (f) fclose(f);
+    char h[24];
+    snprintf(h, sizeof h, "orx:%02x%02x%02x%02x%02x%02x%02x%02x",
+             b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
+    return h;
+}
+
+/* The snapshot, from VARS. The CGI environment (E:) goes to the process   */
+/* environment, as for a CGI.                                               */
+static void modrexx_load(const std::vector<std::pair<std::string, std::string> > &kv)
+{
+    g_mr.init.clear(); g_mr.r.clear(); g_mr.s.clear(); g_mr.c.clear();
+    g_mr.in.clear(); g_mr.env.clear(); g_mr.notes.clear(); g_mr.err.clear();
+    for (size_t i = 0; i < kv.size(); i++) {
+        const std::string &k = kv[i].first, &v = kv[i].second;
+        if (k.size() < 2 || k[1] != ':') continue;
+        std::string name = k.substr(2);
+        switch (k[0]) {
+        case 'v': g_mr.init.push_back(std::make_pair(name, v)); break;
+        case 'r': g_mr.r[name] = v; break;
+        case 's': g_mr.s[name] = v; break;
+        case 'c': g_mr.c[name] = v; break;
+        /* Like apr_table_get: the first of several with the same name.    */
+        case 'i': g_mr.in.insert(std::make_pair(name, v)); break;
+        case 'e': g_mr.env.insert(std::make_pair(name, v)); break;
+        case 'n': g_mr.notes.insert(std::make_pair(name, v)); break;
+        case 'x': g_mr.err.insert(std::make_pair(name, v)); break;
+        case 'E': setenv(name.c_str(), v.c_str(), 1); break;
+        }
+    }
+    g_mr.rh = new_handle(); g_mr.sh = new_handle(); g_mr.ch = new_handle();
+}
+
+static void send_update(const char *op, const std::string &key, const std::string &val)
+{
+    std::string p;
+    unsigned char n[4];
+    const std::string f[3] = { op, key, val };
+    for (int i = 0; i < 3; i++) {
+        oorx_put_u32(n, (uint32_t)f[i].size());
+        p.append((const char *)n, 4);
+        p += f[i];
+    }
+    send_frame(OORX_UPDATE, 0, p.data(), (uint32_t)p.size());
+}
+
+static std::string itos(long v)
+{
+    char b[32];
+    snprintf(b, sizeof b, "%ld", v);
+    return b;
+}
+
+/* Apache's ap_unescape_url after '+' -> ' ', as mod_rexx applied it: a     */
+/* malformed escape stays as it is; a %00 ends the value (it was a C       */
+/* string).                                                                 */
+static std::string unescape(const std::string &in)
+{
+    std::string out;
+    for (size_t i = 0; i < in.size(); i++) {
+        char ch = in[i];
+        if (ch == '+') ch = ' ';
+        else if (ch == '%' && i + 2 < in.size() && isxdigit((unsigned char)in[i + 1]) &&
+                 isxdigit((unsigned char)in[i + 2])) {
+            ch = (char)strtol(in.substr(i + 1, 2).c_str(), NULL, 16);
+            i += 2;
+        }
+        if (ch == '\0') break;
+        out += ch;
+    }
+    return out;
+}
+
+/* Apache's ap_getword: up to the next stop character, which is skipped.   */
+static std::string getword(const std::string &s, size_t &pos, char stop)
+{
+    size_t e = s.find(stop, pos);
+    std::string w = s.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
+    pos = e == std::string::npos ? s.size() : e + 1;
+    return w;
+}
+
+/* A variable of the caller, set as mod_rexx set it: RXSHV_SET, the direct */
+/* interface, with the name exactly as given. A compound name's tail is   */
+/* taken literally, case included (an argument "user" is WWWARGS.user, and */
+/* "k = 'user'; say wwwargs.k" finds it); a simple name in lowercase is a  */
+/* variable no program can reach. SetContextVariable would be symbolic     */
+/* instead (measured): it uppercases, and substitutes the tail's symbols.  */
+static void setvar(RexxExitContext *, const std::string &name, const std::string &val)
+{
+    size_t z = name.find('\0');
+    std::string n = z == std::string::npos ? name : name.substr(0, z);
+    SHVBLOCK b;
+    memset(&b, 0, sizeof b);
+    b.shvcode = RXSHV_SET;
+    b.shvname.strptr = n.c_str();  b.shvname.strlength = n.size();
+    b.shvnamelen = n.size();
+    b.shvvalue.strptr = (char *)val.data(); b.shvvalue.strlength = val.size();
+    b.shvvaluelen = val.size();
+    RexxVariablePool(&b);
+}
+
+/* WWWARGS. from a query string or a urlencoded body, as mod_rexx parsed it. */
+static void parse_vars(RexxExitContext *c, const std::string &data)
+{
+    int num = 0;
+    for (size_t pos = 0; pos < data.size(); ) {
+        std::string val = getword(data, pos, '&');
+        size_t vp = 0;
+        std::string name = getword(val, vp, '=');
+        std::string value = val.substr(vp);
+        name = unescape(name); value = unescape(value);
+        num++;
+        setvar(c, "WWWARGS." + itos(num) + ".!NAME", name);
+        setvar(c, "WWWARGS." + itos(num) + ".!VALUE", value);
+        setvar(c, "WWWARGS." + name, value);
+    }
+    setvar(c, "WWWARGS.0", itos(num));
+}
+
+static void get_args(RexxExitContext *c)
+{
+    long method = atol(g_mr.r["method_number"].c_str());
+    if (method == M_GET) { parse_vars(c, g_mr.r["args"]); return; }
+    if (method == M_POST) {
+        table::iterator t = g_mr.in.find("Content-Type");
+        if (t == g_mr.in.end() ||
+            !strcasecmp(t->second.c_str(), "application/x-www-form-urlencoded")) {
+            while (fill_in(OORX_CHUNK)) ;          /* the whole body       */
+            std::string data;
+            data.swap(g_in);
+            parse_vars(c, data);
+            setvar(c, "WWWPOST_STRING", data);
+            return;
+        }
+    }
+    /* Any other method or content type: mod_rexx left WWWARGS.0 unset,    */
+    /* which made the usual "do i = 1 to wwwargs.0" fail (Error 41).       */
+    setvar(c, "WWWARGS.0", "0");
+}
+
+static void get_cookies(RexxExitContext *c)
+{
+    table::iterator t = g_mr.in.find("Cookie");
+    int num = 0;
+    if (t != g_mr.in.end()) {
+        const std::string &data = t->second;
+        for (size_t pos = 0; pos < data.size(); ) {
+            std::string pair = getword(data, pos, ';');
+            if (pos < data.size() && data[pos] == ' ') pos++;
+            size_t pp = 0;
+            std::string name = getword(pair, pp, '=');
+            while (pp < pair.size()) {
+                std::string val = unescape(getword(pair, pp, '&'));
+                num++;
+                setvar(c, "WWWCOOKIES." + itos(num) + ".!NAME", name);
+                setvar(c, "WWWCOOKIES." + itos(num) + ".!VALUE", val);
+                setvar(c, "WWWCOOKIES." + name, val);
+            }
+        }
+    }
+    setvar(c, "WWWCOOKIES.0", itos(num));
+}
+
+/* Apache's ap_os_escape_path (as measured: what is kept unescaped).       */
+static std::string escape_path(const std::string &path, int partial)
+{
+    static const char keep[] = "!$&'()*+,-./:;=@_~";
+    std::string out;
+    if (!partial) {
+        size_t colon = path.find(':'), slash = path.find('/');
+        if (colon != std::string::npos && (slash == std::string::npos || colon < slash))
+            out = "./";
+    }
+    for (size_t i = 0; i < path.size(); i++) {
+        unsigned char ch = (unsigned char)path[i];
+        if (ch == '\0') break;
+        if (isalnum(ch) || strchr(keep, ch)) out += (char)ch;
+        else { char e[4]; snprintf(e, sizeof e, "%%%02x", ch); out += e; }
+    }
+    return out;
+}
+
+/* A field of the request that a program may read and, with a second       */
+/* argument, write. ret_new: the write returns the new value (method and   */
+/* the numeric ones) rather than "". numeric: the value is a number, as    */
+/* atoi() leaves it.                                                        */
+struct field { const char *fn, *key, *op; bool numeric, ret_new; };
+static const field rw_fields[] = {
+    { "WWWREQRECSTATUS_LINE",      "status_line",       "L", false, false },
+    { "WWWREQRECSTATUS",           "status",            "S", true,  false },
+    { "WWWREQRECMETHOD",           "method",            "M", false, true  },
+    { "WWWREQRECMETHOD_NUMBER",    "method_number",     "N", true,  true  },
+    { "WWWREQRECALLOWED",          "allowed",           "A", true,  true  },
+    { "WWWREQRECNO_CACHE",         "no_cache",          "C", true,  true  },
+    { "WWWREQRECCONTENT_TYPE",     "content_type",      "T", false, false },
+    { "WWWREQRECCONTENT_ENCODING", "content_encoding",  "E", false, false },
+    { "WWWREQRECHANDLER",          "handler",           "H", false, false },
+    { "WWWREQRECCONTENT_LANGUAGES","content_languages", "G", false, false },
+    { "WWWREQRECURI",              "uri",               "U", false, false },
+    { "WWWREQRECFILENAME",         "filename",          "F", false, false },
+    { "WWWREQRECPATH_INFO",        "path_info",         "P", false, false },
+};
+static const struct { const char *fn, *key; } ro_fields[] = {
+    { "WWWREQRECISMAIN", "is_main" },           { "WWWREQRECTHE_REQUEST", "the_request" },
+    { "WWWREQRECPROXYREQ", "proxyreq" },        { "WWWREQRECHEADER_ONLY", "header_only" },
+    { "WWWREQRECPROTOCOL", "protocol" },        { "WWWREQRECBYTES_SENT", "bytes_sent" },
+    { "WWWREQRECARGS", "args" },                { "WWWREQRECFINFO_STMODE", "finfo_stmode" },
+    { "WWWREQRECUSER", "user" },                { "WWWREQRECAUTH_TYPE", "auth_type" },
+};
+/* Tables: (r, key) reads, (r, key, value) writes.                          */
+static const struct { const char *fn; table *t; const char *op; } rw_tables[] = {
+    { "WWWREQRECHEADER_IN",      &g_mr.in,    "i" },
+    { "WWWREQRECERR_HEADER_OUT", &g_mr.err,   "x" },
+    { "WWWREQRECSUBPROCESS_ENV", &g_mr.env,   "e" },
+    { "WWWREQRECNOTES",          &g_mr.notes, "n" },
+};
+
+static int RexxEntry modrexx_ini(RexxExitContext *c, int, int sub, PEXIT)
+{
+    if (sub != RXINIEXT || !g_mr.armed) return RXEXIT_NOT_HANDLED;
+    for (size_t i = 0; i < g_mr.init.size(); i++)
+        setvar(c, g_mr.init[i].first, g_mr.init[i].second);
+    return RXEXIT_HANDLED;
+}
+
+static int RexxEntry modrexx_fnc(RexxExitContext *c, int, int sub, PEXIT parm)
+{
+    if (sub != RXOFNCCAL || !g_mr.armed) return RXEXIT_NOT_HANDLED;
+    RXOFNCCAL_PARM *fp = (RXOFNCCAL_PARM *)parm;
+    if (fp->rxfnc_name.strlength < 3 || strncasecmp(fp->rxfnc_name.strptr, "WWW", 3))
+        return RXEXIT_NOT_HANDLED;
+    std::string fn(fp->rxfnc_name.strptr, fp->rxfnc_name.strlength);
+    for (size_t i = 0; i < fn.size(); i++) fn[i] = (char)toupper((unsigned char)fn[i]);
+
+    /* The arguments as strings; an omitted one is absent.                  */
+    size_t argc = fp->rxfnc_argc;
+    std::vector<std::string> a(argc);
+    std::vector<bool> has(argc, false);
+    for (size_t i = 0; i < argc; i++) {
+        if (fp->rxfnc_argv[i] == NULLOBJECT) continue;
+        RexxStringObject so = c->ObjectToString(fp->rxfnc_argv[i]);
+        a[i].assign(c->StringData(so), c->StringLength(so));
+        has[i] = true;
+    }
+    bool bad = false;
+    std::string ret;
+    /* "Argument i is there", and "argument i is this handle".             */
+    #define ARG(i)     ((i) < argc && has[i])
+    #define IS(i, h)   (ARG(i) && a[i] == (h))
+    #define RET(v)     do { ret = (v); goto done; } while (0)
+    #define BAD()      do { bad = true; goto done; } while (0)
+
+    if (fn == "WWWGETVERSION") {
+        if (argc != 0) BAD();
+        RET(MODREXX_VERSION " " __DATE__ " " __TIME__);
+    }
+    for (size_t i = 0; i < sizeof rw_fields / sizeof *rw_fields; i++) {
+        const field &f = rw_fields[i];
+        if (fn != f.fn) continue;
+        if (argc > 2 || !IS(0, g_mr.rh) || (argc == 2 && !ARG(1))) BAD();
+        if (argc == 2) {
+            std::string v = f.numeric ? itos(atoi(a[1].c_str())) : a[1];
+            std::string &cur = g_mr.r[f.key];
+            if (f.op[0] == 'G') cur = cur.empty() ? v : cur + "," + v;   /* a list */
+            else cur = v;
+            send_update(f.op, "", v);
+            if (!f.ret_new) RET("");
+        }
+        RET(g_mr.r[f.key]);
+    }
+    for (size_t i = 0; i < sizeof ro_fields / sizeof *ro_fields; i++) {
+        if (fn != ro_fields[i].fn) continue;
+        if (argc > 1 || !IS(0, g_mr.rh)) BAD();
+        RET(g_mr.r[ro_fields[i].key]);
+    }
+    for (size_t i = 0; i < sizeof rw_tables / sizeof *rw_tables; i++) {
+        if (fn != rw_tables[i].fn) continue;
+        if (argc < 2 || argc > 3 || !IS(0, g_mr.rh) || !ARG(1) || (argc == 3 && !ARG(2))) BAD();
+        table &t = *rw_tables[i].t;
+        if (argc == 2) {
+            table::iterator e = t.find(a[1]);
+            RET(e == t.end() ? "" : e->second);
+        }
+        t.erase(a[1]); t.insert(std::make_pair(a[1], a[2]));
+        send_update(rw_tables[i].op, a[1], a[2]);
+        RET("");
+    }
+    if (fn == "WWWREQRECHEADER_OUT" || fn == "WWWSETHEADERVALUE") {
+        if (argc != 3 || !IS(0, g_mr.rh) || !ARG(1) || !ARG(2)) BAD();
+        send_update("o", a[1], a[2]);
+        RET("");
+    }
+    if (fn == "WWWADDCOOKIE") {
+        if (argc != 2 || !IS(0, g_mr.rh) || !ARG(1)) BAD();
+        send_update("a", "Set-Cookie", a[1]);
+        RET("");
+    }
+    if (fn == "WWWSENDHTTPHEADER") {
+        /* Only the content type: the headers go with the first output that */
+        /* reaches the client, or at the end.                               */
+        if (argc != 2 || !IS(0, g_mr.rh) || !ARG(1)) BAD();
+        g_mr.r["content_type"] = a[1];
+        send_update("T", "", a[1]);
+        RET("");
+    }
+    if (fn == "WWWLOGERROR" || fn == "WWWLOGWARNING" || fn == "WWWLOGINFO") {
+        if (argc != 2 || !IS(0, g_mr.rh) || !ARG(1)) BAD();
+        send_log(fn == "WWWLOGERROR" ? OORX_LOG_ERR : fn == "WWWLOGWARNING" ?
+                 OORX_LOG_WARNING : OORX_LOG_INFO, a[1].c_str(), strlen(a[1].c_str()));
+        RET("");
+    }
+    if (fn == "WWWLOGREASON") {
+        /* mod_rexx logs it with no level, which is Apache's "emerg".       */
+        if (argc != 3 || !IS(0, g_mr.rh) || !ARG(1) || !ARG(2)) BAD();
+        std::string m = "Access to " + std::string(a[2].c_str()) + " failed for " +
+                        g_mr.r["remote_name"] + ". reason: " + a[1].c_str();
+        send_log(OORX_LOG_EMERG, m.data(), m.size());
+        RET("");
+    }
+    if (fn == "WWWGETARGS" || fn == "WWWGETCOOKIES") {
+        if (argc != 1 || !IS(0, g_mr.rh)) BAD();
+        if (fn == "WWWGETARGS") get_args(c); else get_cookies(c);
+        RET("");
+    }
+    if (fn == "WWWINTERNAL_REDIRECT") {
+        /* Done by the module at the end of the phase.                      */
+        if (argc != 2 || !IS(0, g_mr.rh) || !ARG(1)) BAD();
+        send_update("R", "", a[1]);
+        RET("");
+    }
+    if (fn == "WWWESCAPE_PATH") {
+        if (argc != 3 || !IS(0, g_mr.rh) || !ARG(1) || !ARG(2)) BAD();
+        RET(escape_path(a[1], atoi(a[2].c_str())));
+    }
+    if (fn == "WWWCONSTRUCT_URL") {
+        if (argc != 2 || !IS(0, g_mr.rh) || !ARG(1)) BAD();
+        RET(g_mr.r["url_prefix"] + a[1].c_str());
+    }
+    if (fn == "WWWHTTP_TIME") {
+        if (argc != 1 || !IS(0, g_mr.rh)) BAD();
+        char b[128];
+        time_t now = time(NULL);
+        struct tm tm;
+        localtime_r(&now, &tm);
+        strftime(b, sizeof b, "%a %d %b %Y %T %Z", &tm);
+        RET(b);
+    }
+    if (fn == "WWWREQRECSERVER" || fn == "WWWREQRECCONNECTION") {
+        if (argc > 1 || !IS(0, g_mr.rh)) BAD();
+        RET(fn == "WWWREQRECSERVER" ? g_mr.sh : g_mr.ch);
+    }
+    if (fn == "WWWSRVRECSERVER_ADMIN" || fn == "WWWSRVRECSERVER_HOSTNAME" ||
+        fn == "WWWSRVRECPORT" || fn == "WWWSRVRECIS_VIRTUAL") {
+        if (argc > 1 || !IS(0, g_mr.sh)) BAD();
+        RET(g_mr.s[fn == "WWWSRVRECSERVER_ADMIN" ? "server_admin" :
+                   fn == "WWWSRVRECSERVER_HOSTNAME" ? "server_hostname" :
+                   fn == "WWWSRVRECPORT" ? "port" : "is_virtual"]);
+    }
+    if (fn == "WWWCNXRECABORTED") {
+        if (argc > 1 || !IS(0, g_mr.ch)) BAD();
+        RET(g_mr.c["aborted"]);
+    }
+    return RXEXIT_NOT_HANDLED;          /* not ours: the search goes on      */
+
+done:
+    #undef ARG
+    #undef IS
+    #undef RET
+    #undef BAD
+    if (bad) fp->rxfnc_flags.rxfferr = 1;     /* Error 40 in the program    */
+    else fp->rxfnc_retc = c->NewString(ret.data(), ret.size());
+    return RXEXIT_HANDLED;
+}
+
+/* ------------------------------------------------------------------------ */
 /* Serving one connection                                                   */
 /* ------------------------------------------------------------------------ */
 
@@ -375,8 +808,9 @@ static void serve(int fd)
     /* run native ones: arguments in, a verdict out.                        */
     bool hook = phase == OORX_PHASE_AUTHN || phase == OORX_PHASE_AUTHZ ||
                 phase == OORX_PHASE_LOG;
+    bool modrexx = phase == OORX_PHASE_CONTENT && klass == OORX_CLASS_MODREXX;
     if (!(phase == OORX_PHASE_CONTENT && klass == OORX_CLASS_CGI) &&
-        !(hook && klass == OORX_CLASS_NATIVE)) {
+        !(hook && klass == OORX_CLASS_NATIVE) && !modrexx) {
         logf_conn("oorexx-host: phase/class not implemented yet for %s", program.c_str());
         send_result(501);
         return;
@@ -391,11 +825,13 @@ static void serve(int fd)
         if (!parse_strings(a, args)) return;
         if (oorx_recv_header(fd, &type, &flags, &len) < 0) return;
     }
-    /* VARS: becomes the process environment, exactly as a CGI's.          */
+    /* VARS: becomes the process environment, exactly as a CGI's; for the   */
+    /* modrexx class, it is the snapshot of the request.                    */
     if (type != OORX_VARS) return;
     std::string vars(len, '\0');
     if (len && oorx_read_all(fd, &vars[0], len) < 0) return;
     clearenv();
+    std::vector<std::pair<std::string, std::string> > kv;
     for (size_t p = 0; p + 4 <= vars.size(); ) {
         uint32_t kl = oorx_get_u32((const unsigned char *)&vars[p]); p += 4;
         if (p + kl + 4 > vars.size()) break;
@@ -403,18 +839,32 @@ static void serve(int fd)
         uint32_t vl = oorx_get_u32((const unsigned char *)&vars[p]); p += 4;
         if (p + vl > vars.size()) break;
         std::string v = vars.substr(p, vl); p += vl;
-        setenv(k.c_str(), v.c_str(), 1);
+        if (modrexx) kv.push_back(std::make_pair(k, v));
+        else setenv(k.c_str(), v.c_str(), 1);
     }
+    if (modrexx) modrexx_load(kv);
 
-    /* Like mod_cgi: run in the program's directory.                        */
-    std::string dir = program.substr(0, program.rfind('/') + 1);
+    /* Like mod_cgi: run in the program's directory; a modrexx program, in   */
+    /* Apache's, the root, as under mod_rexx.                                */
+    std::string dir = modrexx ? "/" : program.substr(0, program.rfind('/') + 1);
     if (!dir.empty() && chdir(dir.c_str()) < 0) { /* not fatal */ }
 
     /* A fresh instance for this phase.                                     */
     RexxLibraryPackage lib = { "OORXHOST", &host_package };
-    RexxOption opts[2];
+    RexxContextExit exits[3] = { { modrexx_ini, RXINI }, { modrexx_fnc, RXOFNC },
+                                 { NULL, 0 } };
+    RexxOption opts[4];
     opts[0].optionName = REGISTER_LIBRARY; opts[0].option = (void *)&lib;
     opts[1].optionName = NULL;
+    if (modrexx) {
+        opts[1].optionName = DIRECT_EXITS; opts[1].option = (void *)exits;
+        /* mod_rexx's: no such environment, so a command fails (RC -3)     */
+        /* instead of reaching a shell.                                     */
+        opts[2].optionName = INITIAL_ADDRESS_ENVIRONMENT; opts[2].option = "WWW";
+        opts[3].optionName = NULL;
+    }
+    g_mr.armed = false;
+    g_quiet_flush = !modrexx;
     RexxInstance *inst; RexxThreadContext *tc;
     if (!RexxCreateInterpreter(&inst, &tc, opts)) {
         logf_conn("oorexx-host: cannot create an interpreter instance%s", "");
@@ -451,13 +901,17 @@ static void serve(int fd)
         status = 500;
     } else {
         RexxArrayObject pargs = NULLOBJECT;
+        /* A modrexx program's only argument: its request.                  */
+        if (modrexx) args.assign(1, g_mr.rh);
         if (!args.empty()) {
             pargs = tc->NewArray(args.size());
             for (size_t i = 0; i < args.size(); i++)
                 tc->ArrayPut(pargs, tc->NewString(args[i].data(), args[i].size()), i + 1);
         }
         wd_arm(inst, timeout);
+        g_mr.armed = modrexx;
         RexxObjectPtr ret = tc->CallProgram(program.c_str(), pargs);
+        g_mr.armed = false;
         bool halted = wd_disarm();
         if (!tc->CheckCondition() && ret != NULLOBJECT) {
             RexxStringObject rs = tc->ObjectToString(ret);
@@ -480,8 +934,9 @@ static void serve(int fd)
             if (halted) m += " (phase timeout)";
             tc->ClearCondition();
             send_log(OORX_LOG_ERR, m.data(), m.size());
-            /* A CGI's failure shows in its output; a hook's is its verdict. */
-            if (hook) { status = 500; has_value = false; }
+            /* A CGI's failure shows in its output; a hook's is its verdict; */
+            /* a modrexx program's, a 500, as under mod_rexx.                */
+            if (hook || modrexx) { status = 500; has_value = false; }
         }
         /* Close the program's output: flushes what the stream still holds. */
         tc->SendMessage0(out, "CLOSE");

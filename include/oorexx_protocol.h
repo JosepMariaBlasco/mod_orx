@@ -13,7 +13,7 @@
  * tables are sequences of (u32 length, bytes) pairs.
  *
  * Module -> host:  BEGIN, [ARGS], VARS, BODY
- * Host -> module:  READ, HEADERS, DATA, LOG, RESULT
+ * Host -> module:  READ, UPDATE, DATA, LOG, RESULT
  *
  * This header is shared by the module (C) and the host (C++). It holds only
  * POSIX file-descriptor helpers; the Windows transport is still to be
@@ -42,10 +42,14 @@ enum {
     OORX_ARGS    = 'A',  /* M->H  the program's arguments, as a sequence of
                                   (u32 length, bytes); optional, between
                                   BEGIN and VARS                           */
-    OORX_VARS    = 'V',  /* M->H  key/value table (CGI environment)       */
+    OORX_VARS    = 'V',  /* M->H  key/value table: the CGI environment;
+                                  for the modrexx class, the snapshot of
+                                  the request (see oorexx-host.cpp)        */
     OORX_BODY    = 'b',  /* M->H  request body chunk; length 0 = EOF      */
     OORX_READ    = 'R',  /* H->M  u32: please send up to n body bytes     */
-    OORX_HEADERS = 'H',  /* H->M  native class only (not used by cgi)     */
+    OORX_UPDATE  = 'U',  /* H->M  modrexx class: one change to the request
+                                  (status, a header, a field...), as three
+                                  strings: operation, key, value           */
     OORX_DATA    = 'D',  /* H->M  response bytes; flag FLUSH = flush now  */
     OORX_LOG     = 'L',  /* H->M  u8 level, then the message              */
     OORX_RESULT  = 'E'   /* H->M  u32 status (0 = OK), end of the phase;
@@ -64,8 +68,8 @@ enum { OORX_PHASE_CONTENT = 1, OORX_PHASE_AUTHN = 2, OORX_PHASE_AUTHZ = 3,
 /* Program classes */
 enum { OORX_CLASS_CGI = 1, OORX_CLASS_MODREXX = 2, OORX_CLASS_NATIVE = 3 };
 
-/* LOG levels (mapped to APLOG_* by the module) */
-enum { OORX_LOG_ERR = 3, OORX_LOG_WARNING = 4, OORX_LOG_INFO = 6 };
+/* LOG levels: the numbers of Apache's APLOG_* levels */
+enum { OORX_LOG_EMERG = 0, OORX_LOG_ERR = 3, OORX_LOG_WARNING = 4, OORX_LOG_INFO = 6 };
 
 static inline void oorx_put_u32(unsigned char *p, uint32_t v)
 {

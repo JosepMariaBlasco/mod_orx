@@ -24,6 +24,9 @@
  *       log    status, bytes, microsecs   (the value is ignored)
  *
  *     Any other value, or an error in the program, is a general error (500).
+ *   - The content handler "oorexx-modrexx", which runs programs written for
+ *     mod_rexx unchanged: arg(1) is the request, the WWW* variables and
+ *     functions are there, and what the program returns is the status.
  *   - The host's life cycle, in the manner of mod_cgid's daemon: the module
  *     binds the socket (as root, in Apache's run-time directory, owned by
  *     Apache's User), starts oorexx-host on it in post_config, restarts it
@@ -40,6 +43,8 @@
  *   <Location ...>   AuthType Basic  AuthName x  AuthBasicProvider oorexx
  *                    OoRexxAuthnProgram /path/authn.rex
  *                    Require oorexx /path/authz.rex admins     </Location>
+ *   <Directory ...>  AddHandler oorexx-modrexx .rex
+ *                    OoRexxSetVar NAME value                   </Directory>
  *   OoRexxLogHook /path/log.rex
  */
 
@@ -101,6 +106,7 @@ typedef struct {
     int         timeout;        /* -1 = unset                            */
     const char *authn_program;  /* OoRexxAuthnProgram; NULL = unset      */
     const char *log_hook;       /* OoRexxLogHook; NULL = unset, "" = off */
+    apr_array_header_t *setvars;/* OoRexxSetVar: name, value, name...    */
 } oorx_dir_cfg;
 
 static void *create_dir_cfg(apr_pool_t *p, char *dir)
@@ -117,6 +123,10 @@ static void *merge_dir_cfg(apr_pool_t *p, void *basev, void *addv)
     c->timeout = add->timeout >= 0 ? add->timeout : base->timeout;
     c->authn_program = add->authn_program ? add->authn_program : base->authn_program;
     c->log_hook = add->log_hook ? add->log_hook : base->log_hook;
+    /* OoRexxSetVar adds up: the outer ones first, so an inner one with    */
+    /* the same name wins (it is set later).                              */
+    c->setvars = !add->setvars ? base->setvars : !base->setvars ? add->setvars
+               : apr_array_append(p, base->setvars, add->setvars);
     return c;
 }
 
@@ -136,6 +146,18 @@ static const char *set_log_hook(cmd_parms *cmd, void *dcfg, const char *arg)
     oorx_dir_cfg *c = dcfg;
     if (!strcasecmp(arg, "none")) { c->log_hook = ""; return NULL; }
     return set_program(cmd, dcfg, arg);
+}
+
+/* OoRexxSetVar name value: a variable more for every modrexx program,   */
+/* like mod_rexx's RexxSetVar.                                             */
+static const char *add_setvar(cmd_parms *cmd, void *dcfg, const char *name,
+                              const char *value)
+{
+    oorx_dir_cfg *c = dcfg;
+    if (!c->setvars) c->setvars = apr_array_make(cmd->pool, 4, sizeof(const char *));
+    *(const char **)apr_array_push(c->setvars) = name;
+    *(const char **)apr_array_push(c->setvars) = value;
+    return NULL;
 }
 
 static const char *set_socket(cmd_parms *cmd, void *dummy, const char *arg)
@@ -240,6 +262,8 @@ static const command_rec oorx_cmds[] = {
                   "The Rexx program behind \"AuthBasicProvider oorexx\""),
     AP_INIT_TAKE1("OoRexxLogHook", set_log_hook, NULL, RSRC_CONF | ACCESS_CONF,
                   "A Rexx program to run in the logging phase, or \"none\""),
+    AP_INIT_TAKE2("OoRexxSetVar", add_setvar, NULL, OR_ALL,
+                  "A variable (name and value) for every program of the modrexx class"),
     {NULL}
 };
 
@@ -521,7 +545,10 @@ typedef struct {
     uint32_t     status;       /* from RESULT */
     const char  *value;        /* from RESULT: what the program returned, */
                                /* or NULL if it returned nothing           */
+    const char  *redirect;     /* modrexx: WWWInternal_Redirect's URI      */
 } oorx_conn;
+
+static void apply_update(oorx_conn *c, const char *op, const char *key, const char *val);
 
 static int connect_host(request_rec *r, const char *path, int timeout)
 {
@@ -607,9 +634,27 @@ static int pump(oorx_conn *c)
             char *m = apr_palloc(c->r->pool, len + 1);
             if (len && oorx_read_all(c->fd, m, len) < 0) { c->failed = 1; break; }
             m[len] = '\0';
-            ap_log_rerror(APLOG_MARK, len && m[0] == OORX_LOG_INFO ? APLOG_INFO :
-                          len && m[0] == OORX_LOG_WARNING ? APLOG_WARNING : APLOG_ERR,
+            /* The level is the number of an APLOG_* level.                 */
+            ap_log_rerror(APLOG_MARK, len && (unsigned char)m[0] <= APLOG_DEBUG ? m[0] : APLOG_ERR,
                           0, c->r, "%s", len ? m + 1 : "");
+            break;
+        }
+        case OORX_UPDATE: {
+            /* Three strings: operation, key, value.                        */
+            unsigned char *m = apr_palloc(c->r->pool, len + 3);
+            const char *f[3];
+            uint32_t p = 0, n;
+            int i;
+            if (len && oorx_read_all(c->fd, m, len) < 0) { c->failed = 1; break; }
+            for (i = 0; i < 3; i++) {
+                if (p + 4 > len || (n = oorx_get_u32(m + p)) > len - p - 4) break;
+                memmove(m + p, m + p + 4, n);  /* make room for the NUL      */
+                m[p + n] = '\0';
+                f[i] = (const char *)m + p;
+                p += 4 + n;
+            }
+            if (i < 3) { c->failed = 1; break; }
+            apply_update(c, f[0], f[1], f[2]);
             break;
         }
         case OORX_RESULT: {
@@ -797,6 +842,296 @@ static int oorx_cgi_handler(request_rec *r)
 }
 
 /* ------------------------------------------------------------------------ */
+/* The oorexx-modrexx handler: programs written for mod_rexx                */
+/*                                                                          */
+/* What a mod_rexx program expects (arg(1) is the request, the WWW*         */
+/* functions read and change it, the variables WWW* exist before its first  */
+/* line, what it returns is the handler's status) is provided by the host;  */
+/* the module sends it a SNAPSHOT of the request in VARS and applies the    */
+/* changes the program makes, which come back as UPDATE frames. Keys of the */
+/* snapshot, by their first two characters:                                */
+/*                                                                          */
+/*   v:  the initial variables, in the order they are set                  */
+/*   r:  s:  c:  fields of the request, its server and its connection      */
+/*   i:  e:  n:  x:  headers_in, subprocess_env, notes, err_headers_out    */
+/*   E:  the CGI environment (the program's process environment)          */
+/*                                                                          */
+/* Measured against mod_rexx 2.4.0 (the last one) under Apache 2.4.        */
+/* ------------------------------------------------------------------------ */
+
+#define MODREXX_VERSION "Mod_Rexx/2.4.0"
+
+typedef struct { apr_pool_t *p; char **buf; apr_size_t *len, *cap; char kind; } snap_ctx;
+
+static void snap(snap_ctx *x, const char *key, const char *value)
+{
+    char *k = apr_pstrcat(x->p, "?:", key, NULL);
+    k[0] = x->kind;
+    if (!value) value = "";
+    append_kv(x->p, x->buf, x->len, x->cap, k, strlen(k), value, strlen(value));
+}
+
+static int snap_table(void *data, const char *key, const char *value)
+{
+    snap((snap_ctx *)data, key, value);
+    return 1;
+}
+
+static void snap_int(snap_ctx *x, const char *key, long v)
+{
+    snap(x, key, apr_ltoa(x->p, v));
+}
+
+static char *modrexx_snapshot(request_rec *r, apr_size_t *vlen)
+{
+    oorx_dir_cfg *dcfg = ap_get_module_config(r->per_dir_config, &orx_module);
+    char *vars = NULL, **env;
+    apr_size_t vcap = 0;
+    snap_ctx x = { r->pool, &vars, vlen, &vcap, 'v' };
+    request_rec *sub;
+    apr_table_t *saved = r->subprocess_env;
+    int i;
+
+    *vlen = 0;
+    /* The initial variables, as mod_rexx's RXINI exit sets them.          */
+    snap(&x, "WWWAUTH_TYPE", r->ap_auth_type);
+    snap(&x, "WWWCONTENT_LENGTH", apr_table_get(r->headers_in, "Content-Length"));
+    snap(&x, "WWWCONTENT_TYPE", apr_table_get(r->headers_in, "Content-Type"));
+    snap(&x, "WWWGATEWAY_INTERFACE", MODREXX_VERSION);
+    snap(&x, "WWWHTTP_USER_ACCEPT", apr_table_get(r->headers_in, "Accept"));
+    snap(&x, "WWWHTTP_USER_AGENT", apr_table_get(r->headers_in, "User-Agent"));
+    snap(&x, "WWWPATH_INFO", r->path_info);
+    /* mod_rexx looks the path info up even when there is none, and gets   */
+    /* the request's directory then.                                       */
+    sub = ap_sub_req_lookup_uri(r->path_info ? r->path_info : "", r, NULL);
+    snap(&x, "WWWPATH_TRANSLATED", sub->filename);
+    ap_destroy_sub_req(sub);
+    snap(&x, "WWWQUERY_STRING", r->args);
+    snap(&x, "WWWREMOTE_ADDR", r->useragent_ip);
+    snap(&x, "WWWREMOTE_HOST", ap_get_remote_host(r->connection, r->per_dir_config,
+                                                  REMOTE_HOST, NULL));
+    snap(&x, "WWWREMOTE_IDENT", ap_get_remote_logname(r));
+    snap(&x, "WWWREMOTE_USER", r->user);
+    snap(&x, "WWWREQUEST_METHOD", r->method);
+    snap(&x, "WWWSCRIPT_NAME", r->uri);
+    snap(&x, "WWWSERVER_NAME", ap_get_server_name(r));
+    snap_int(&x, "WWWSERVER_PORT", ap_get_server_port(r));
+    snap(&x, "WWWSERVER_PROTOCOL", r->protocol);
+    snap(&x, "WWWSERVER_SOFTWARE", ap_get_server_description());
+    snap(&x, "WWWDEFAULT_TYPE", "text/plain");
+    snap(&x, "WWWIS_MAIN_REQUEST", r->main ? "0" : "1");
+    snap(&x, "WWWSERVER_ROOT", ap_server_root_relative(r->pool, ""));
+    snap(&x, "WWWUNPARSEDURI", r->unparsed_uri);
+    snap(&x, "WWWURI", r->uri);
+    snap(&x, "WWWFILENAME", r->filename);
+    snap(&x, "WWWPOST_STRING", "");
+    if (dcfg->setvars)
+        for (i = 0; i + 1 < dcfg->setvars->nelts; i += 2)
+            snap(&x, APR_ARRAY_IDX(dcfg->setvars, i, const char *),
+                 APR_ARRAY_IDX(dcfg->setvars, i + 1, const char *));
+    /* mod_rexx's defaults; RSP itself is not supported.                   */
+    snap(&x, "WWWRSPCOMPILER", "rspcomp.rex");
+    snap(&x, "WWWFNAMETEMPLATE", "./execrsp?????.rex");
+
+    /* What the WWW* functions read.                                       */
+    x.kind = 'r';
+    snap(&x, "the_request", r->the_request);
+    snap_int(&x, "proxyreq", r->proxyreq);
+    snap_int(&x, "header_only", r->header_only);
+    snap(&x, "protocol", r->protocol);
+    snap(&x, "status_line", r->status_line);
+    snap_int(&x, "status", r->status);
+    snap(&x, "method", r->method);
+    snap_int(&x, "method_number", r->method_number);
+    snap_int(&x, "allowed", (int)r->allowed);
+    snap_int(&x, "bytes_sent", (int)r->bytes_sent);
+    snap(&x, "content_type", r->content_type);
+    snap(&x, "content_encoding", r->content_encoding);
+    snap(&x, "handler", r->handler);
+    snap(&x, "content_languages", r->content_languages ?
+         apr_array_pstrcat(r->pool, r->content_languages, ',') : NULL);
+    snap_int(&x, "no_cache", r->no_cache);
+    snap(&x, "uri", r->uri);
+    snap(&x, "filename", r->filename);
+    snap(&x, "path_info", r->path_info);
+    snap(&x, "args", r->args);
+    snap(&x, "finfo_stmode", apr_psprintf(r->pool, "%X", (unsigned)r->finfo.filetype));
+    snap(&x, "user", r->user);
+    snap(&x, "auth_type", r->ap_auth_type);
+    snap(&x, "is_main", r->main ? "0" : "1");
+    snap(&x, "url_prefix", ap_construct_url(r->pool, "", r));
+    snap(&x, "remote_name", ap_get_remote_host(r->connection, r->per_dir_config,
+                                               REMOTE_NAME, NULL));
+    x.kind = 's';
+    snap(&x, "server_admin", r->server->server_admin);
+    snap(&x, "server_hostname", r->server->server_hostname);
+    snap_int(&x, "port", r->server->port);
+    snap_int(&x, "is_virtual", r->server->is_virtual);
+    x.kind = 'c';
+    snap_int(&x, "aborted", r->connection->aborted);
+    x.kind = 'i'; apr_table_do(snap_table, &x, r->headers_in, NULL);
+    x.kind = 'e'; apr_table_do(snap_table, &x, r->subprocess_env, NULL);
+    x.kind = 'n'; apr_table_do(snap_table, &x, r->notes, NULL);
+    x.kind = 'x'; apr_table_do(snap_table, &x, r->err_headers_out, NULL);
+
+    /* The CGI environment, on a copy, so that it is not what              */
+    /* WWWReqRecSubprocess_env reads.                                       */
+    r->subprocess_env = apr_table_copy(r->pool, saved);
+    ap_add_common_vars(r);
+    ap_add_cgi_vars(r);
+    env = ap_create_environment(r->pool, r->subprocess_env);
+    r->subprocess_env = saved;
+    x.kind = 'E';
+    for (i = 0; env[i]; i++) {
+        char *eq = strchr(env[i], '=');
+        if (!eq) continue;
+        *eq = '\0';
+        snap(&x, env[i], eq + 1);
+    }
+    return vars;
+}
+
+/* A change the program made to the request (see snapshot keys above).     */
+static void apply_update(oorx_conn *c, const char *op, const char *key, const char *val)
+{
+    request_rec *r = c->r;
+    const char *v = apr_pstrdup(r->pool, val);
+    switch (op[0]) {
+    case 'S': r->status = atoi(v); break;
+    case 'L': r->status_line = v; break;
+    case 'M': r->method = v; break;
+    case 'N': r->method_number = atoi(v); break;
+    case 'A': r->allowed = atoi(v); break;
+    case 'T': ap_set_content_type(r, v); break;
+    case 'E': r->content_encoding = v; break;
+    case 'H': r->handler = v; break;
+    case 'G':
+        if (!r->content_languages)
+            r->content_languages = apr_array_make(r->pool, 1, sizeof(const char *));
+        *(const char **)apr_array_push(r->content_languages) = v;
+        break;
+    case 'C': r->no_cache = atoi(v); break;
+    case 'U': r->uri = (char *)v; break;
+    case 'F': r->filename = (char *)v; break;
+    case 'P': r->path_info = (char *)v; break;
+    case 'i': apr_table_set(r->headers_in, key, v); break;
+    case 'o': apr_table_set(r->headers_out, key, v); break;
+    case 'a': apr_table_add(r->headers_out, key, v); break;
+    case 'x': apr_table_set(r->err_headers_out, key, v); break;
+    case 'e': apr_table_set(r->subprocess_env, key, v); break;
+    case 'n': apr_table_set(r->notes, key, v); break;
+    case 'R': c->redirect = v; break;
+    default:
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                      "mod_orx: unknown update \"%s\" from oorexx-host", op);
+    }
+}
+
+/* What RexxStart made of a program's result, as mod_rexx used it: a whole  */
+/* number that fits in a short, or 0 (no value, or any other value).        */
+static int modrexx_status(const char *value)
+{
+    const char *p = value;
+    long v = 0;
+    int neg = 0, digits = 0;
+    if (!p) return 0;
+    while (*p == ' ') p++;
+    if (*p == '+' || *p == '-') neg = *p++ == '-';
+    for (; *p >= '0' && *p <= '9'; p++, digits++) {
+        v = v * 10 + (*p - '0');
+        if (v > 100000) return 0;
+    }
+    if (*p == '.') for (p++; *p == '0'; p++) ;
+    while (*p == ' ') p++;
+    if (!digits || *p) return 0;
+    if (neg) v = -v;
+    return v < -32768 || v > 32767 ? 0 : (int)v;
+}
+
+static int oorx_modrexx_handler(request_rec *r)
+{
+    oorx_dir_cfg *dcfg;
+    oorx_conn *c;
+    char *vars, *begin;
+    apr_size_t vlen, plen;
+    int timeout, ret;
+
+    if (strcmp(r->handler, "oorexx-modrexx")) return DECLINED;
+
+    /* mod_rexx answers a HEAD itself, without running the program.        */
+    if (r->header_only) {
+        ap_set_content_type(r, "text/html");
+        return OK;
+    }
+    if (r->finfo.filetype == APR_NOFILE) {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                      "mod_orx: program not found or unable to stat: %s", r->filename);
+        return HTTP_NOT_FOUND;
+    }
+    if (!g_socket_path) {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                      "mod_orx: OoRexxHost is none and OoRexxSocket is not set");
+        return HTTP_INTERNAL_SERVER_ERROR;
+    }
+    dcfg = ap_get_module_config(r->per_dir_config, &orx_module);
+    timeout = dcfg->timeout > 0 ? dcfg->timeout : DEFAULT_TIMEOUT;
+
+    vars = modrexx_snapshot(r, &vlen);
+    if ((ret = ap_setup_client_block(r, REQUEST_CHUNKED_DECHUNK)) != OK) return ret;
+
+    c = apr_pcalloc(r->pool, sizeof *c);
+    c->r = r;
+    c->fd = connect_host(r, g_socket_path, timeout);
+    if (c->fd < 0) return HTTP_SERVICE_UNAVAILABLE;
+    apr_pool_cleanup_register(r->pool, (void *)(apr_uintptr_t)c->fd, close_fd,
+                              apr_pool_cleanup_null);
+    c->has_body = ap_should_client_block(r);
+
+    plen = strlen(r->filename);
+    begin = apr_palloc(r->pool, 7 + plen);
+    begin[0] = OORX_PROTOCOL_VERSION;
+    begin[1] = OORX_PHASE_CONTENT;
+    begin[2] = OORX_CLASS_MODREXX;
+    oorx_put_u32((unsigned char *)begin + 3, (uint32_t)timeout);
+    memcpy(begin + 7, r->filename, plen);
+    if (oorx_send(c->fd, OORX_BEGIN, 0, begin, (uint32_t)(7 + plen)) < 0 ||
+        oorx_send(c->fd, OORX_VARS, 0, vars, (uint32_t)vlen) < 0) {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r, "mod_orx: cannot talk to oorexx-host");
+        return HTTP_SERVICE_UNAVAILABLE;
+    }
+
+    /* The output is the body, as it comes; status and headers are what    */
+    /* the program set. Apache holds a small response until the end, so    */
+    /* what the program returns can still replace it (an error, say), as   */
+    /* under mod_rexx.                                                     */
+    for (;;) {
+        if (c->pos < c->len) {
+            if (!c->redirect) ap_rwrite(c->buf + c->pos, (int)(c->len - c->pos), r);
+            c->pos = c->len;
+        }
+        if (c->flush && !c->redirect) ap_rflush(r);
+        c->flush = 0;
+        if (!pump(c)) break;
+    }
+    if (!c->done) {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r,
+                      "mod_orx: connection to oorexx-host lost before the end of %s",
+                      r->filename);
+        return HTTP_INTERNAL_SERVER_ERROR;
+    }
+    if (c->status != 0) return HTTP_INTERNAL_SERVER_ERROR;   /* the host logged why */
+    /* WWWInternal_Redirect, deferred to here: the program's own output is  */
+    /* dropped, as under mod_rexx.                                          */
+    if (c->redirect) {
+        ap_internal_redirect(c->redirect, r);
+        return OK;
+    }
+    /* 0 OK, -1 DECLINED, -2 DONE, or an HTTP status: mod_rexx's handler    */
+    /* returns the number as it is.                                        */
+    return modrexx_status(c->value);
+}
+
+/* ------------------------------------------------------------------------ */
 /* Hooks: authentication, authorization and logging                         */
 /*                                                                          */
 /* A hook program gets the CGI environment (built on a copy of             */
@@ -973,6 +1308,7 @@ static void register_hooks(apr_pool_t *p)
     ap_hook_post_config(oorx_post_config, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_child_init(oorx_child_init, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_handler(oorx_cgi_handler, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_handler(oorx_modrexx_handler, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_log_transaction(oorx_log_transaction, NULL, NULL, APR_HOOK_MIDDLE);
     ap_register_auth_provider(p, AUTHN_PROVIDER_GROUP, "oorexx", AUTHN_PROVIDER_VERSION,
                               &oorx_authn_provider, AP_AUTH_INTERNAL_PER_CONF);

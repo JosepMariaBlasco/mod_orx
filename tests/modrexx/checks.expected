@@ -1,0 +1,14 @@
+WWWReqRecUri() -> Error 40.1
+WWWReqRecUri("0x1234") -> Error 40.1
+WWWReqRecUri(s) -> Error 40.1
+WWWSrvRecPort(r) -> Error 40.1
+WWWSrvRecPort(s) -> [80]
+WWWCnxRecAborted(s) -> Error 40.1
+WWWCnxRecAborted(c) -> [0]
+WWWReqRecUri(r,) -> [/oorexx-modrexx/checks.rex]
+WWWReqRecNext(r) -> Error 43.1
+WWWNoSuchThing(r) -> Error 43.1
+handles: 1 orx: 20
+WWWARGS.0=0 POST_STRING=[]
+via .output
+via lineout

@@ -11,8 +11,9 @@ unchanged, in place of mod_cgid, under both the event and the prefork MPM.
 Apache starts, watches and restarts the host itself. Rexx programs can also
 authenticate users, authorize requests and log them, through Apache's own
 provider mechanisms. Large packages such as RexxHTTP's classes can be
-preloaded once per host process. The remaining phases, the native and
-mod_rexx-compatible program classes, and Windows are still to come. Not for
+preloaded once per host process. Programs written for mod_rexx run
+unchanged as content handlers (`oorexx-modrexx`, see below). The remaining
+phases, the native program class, and Windows are still to come. Not for
 production yet.
 
 ## Design in one page
@@ -120,6 +121,7 @@ OoRexxTimeout 60
 | `OoRexxAuthnProgram path` | none | The program behind `AuthBasicProvider oorexx`. Per directory. |
 | `OoRexxLogHook path` \| `none` | none | A program to run in the logging phase. Per directory; `none` switches off an inherited one. |
 | `OoRexxPreload file...` | none | Rexx packages every host process loads once, when it starts (see below). May be repeated. |
+| `OoRexxSetVar name value` | none | A variable more for every `oorexx-modrexx` program, like mod_rexx's `RexxSetVar`. Per directory, also in `.htaccess`; the outer ones are inherited. |
 
 `OoRexxHost`, `OoRexxSocket`, `OoRexxProcesses`, `OoRexxMaxRequests` and
 `OoRexxPreload` are global: they cannot appear inside `<VirtualHost>`.
@@ -205,6 +207,60 @@ authorized gets a 401, as with `Require user`, unless
 Each phase runs in a fresh interpreter instance, like a CGI: about 1.4 ms
 per hook, measured on a static file with a hook that only returns `1`.
 
+### Programs written for mod_rexx
+
+[mod_rexx](https://sourceforge.net/projects/modrexx/) programs run unchanged
+under the handler `oorexx-modrexx`: they get their request in `arg(1)`, the
+`WWW*` variables exist before their first line, the `WWW*` functions are
+there without being declared, and what they return is the handler's status
+(`0` OK, `-1` declined, `-2` done, or an HTTP status). Their own
+`Apache.cls` keeps working, since it only calls those functions. The
+configuration changes, as the table shows:
+
+| mod_rexx | mod_orx |
+|---|---|
+| `LoadModule rexx_module .../mod_rexx.so` | `LoadModule orx_module .../mod_orx.so` |
+| `AddHandler rexx-handler .rex` | `AddHandler oorexx-modrexx .rex` |
+| `RexxSetVar name value` | `OoRexxSetVar name value` |
+| `RexxHandler`, `RexxTransHandler` and the other phases | not yet |
+| `RexxRspCompiler`, `RexxTempFileNameTemplate` (RSP pages) | not supported |
+
+Every variable and function behaves as under mod_rexx 2.4.0, its last
+version, measured on the same programs under both (`tests/modrexx.sh`),
+down to its oddities: a variable is set with its name exactly as written,
+so that a form field `user` is `WWWARGS.user` (found with `k = 'user';
+say wwwargs.k`) and an `OoRexxSetVar` name in lowercase is not visible to
+the program; Apache holds a small response until the end, so that a status
+returned after some output still replaces it; a `HEAD` request is answered
+without running the program. The program runs in `/`, and a command goes
+to the environment `WWW`, which does not exist (RC -3), not to a shell, as
+under mod_rexx. The differences:
+
+- The request is an opaque handle (`orx:` and 16 hex digits), not a
+  pointer. A value that is not this request's handle (or its server's, or
+  its connection's, where those are expected) is Error 40.1 in the program;
+  under mod_rexx it crashed Apache's process.
+- All the program's output reaches the client (`Say`, `.output`,
+  `lineout`, `charout`...), not only `Say`; the request body can also be
+  read as input, and `WWWGetArgs` then gets what is left of it. A chunked
+  body is accepted.
+- `WWWGetArgs` sets `WWWARGS.0` to 0 when it has nothing to parse (a POST
+  that is not urlencoded, a PUT...); mod_rexx left it unset, and the usual
+  `do i = 1 to wwwargs.0` failed.
+- An error in the program is Apache's usual 500 page, and the error, with
+  its line, goes to the error log; mod_rexx sent a page of its own with the
+  program's path and the error.
+- `WWWSERVER_SOFTWARE` does not include `Mod_Rexx/2.4.0`, which mod_rexx
+  added to Apache's own version string. `WWWGetVersion` and
+  `WWWGATEWAY_INTERFACE` say `Mod_Rexx/2.4.0`, in case a program checks.
+- The program's process environment is the CGI environment.
+- Not yet: subrequests (`WWWSub_Req_Lookup_URI`, `WWWSub_Req_Lookup_File`,
+  `WWWRun_Sub_Req`) and `WWWReqRecNext`, `WWWReqRecPrev`, `WWWReqRecMain`.
+  A call to one of them is Error 43, routine not found.
+
+`WWWInternal_Redirect` is done when the program ends, and what the program
+wrote is dropped, as mod_rexx's output was.
+
 To debug the host (under a debugger, say), set `OoRexxHost none`, choose an
 `OoRexxSocket` in a directory that Apache's user owns, and start the host
 there yourself, as that user:
@@ -236,6 +292,11 @@ including errors, timeouts and the error log.
 `tests/preload.sh`, run after the suite, checks `OoRexxPreload`: what a
 preloaded package shares between phases and what a program's own package
 does not, a missing file, and a file that fails to load.
+
+`tests/modrexx.sh`, run after the suite, checks `oorexx-modrexx` against
+the answers of mod_rexx 2.4.0 itself, measured on the same programs: every
+initial variable, every `WWW*` function, every write and what a later read
+sees, and what each kind of return value makes of the response.
 
 ## License
 
