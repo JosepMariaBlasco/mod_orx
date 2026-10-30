@@ -21,8 +21,10 @@
  *   - A child exits after --max-requests connections (the master replaces
  *     it): .environment is process-global and survives instances, so this
  *     bounds what a program can leak to later ones.
- *   - Phases: content (a CGI program, or a program written for mod_rexx:
- *     the modrexx class, below), and the hooks authn, authz and log.
+ *   - Phases: content (a CGI program), the hooks authn, authz and log (a
+ *     native program), and every phase for a program written for mod_rexx
+ *     (the modrexx class, below; outside the content phase its output goes
+ *     nowhere, as under mod_rexx).
  *     A hook program gets the CGI environment, its arguments (ARGS), and
  *     returns a value that the module reads as its verdict. Its output has
  *     no client to go to, so it goes to the error log, like .error.
@@ -366,6 +368,7 @@ typedef std::map<std::string, std::string, nocase> table;
 
 static struct {
     bool armed;                     /* the program is running             */
+    int  phase;                     /* OORX_PHASE_*                       */
     std::string rh, sh, ch;         /* the handles                        */
     std::vector<std::pair<std::string, std::string> > init;   /* v: */
     std::map<std::string, std::string> r, s, c;               /* fields */
@@ -705,8 +708,15 @@ static int RexxEntry modrexx_fnc(RexxExitContext *c, int, int sub, PEXIT parm)
         RET("");
     }
     if (fn == "WWWINTERNAL_REDIRECT") {
-        /* Done by the module at the end of the phase.                      */
+        /* Done by the module at the end of the phase. Only in the content  */
+        /* phase: in any other, mod_rexx crashed Apache's process.          */
         if (argc != 2 || !IS(0, g_mr.rh) || !ARG(1)) BAD();
+        if (g_mr.phase != OORX_PHASE_CONTENT) {
+            static const char m[] = "oorexx-host: WWWInternal_Redirect is only "
+                                    "available in the content phase";
+            send_log(OORX_LOG_ERR, m, sizeof m - 1);
+            BAD();
+        }
         send_update("R", "", a[1]);
         RET("");
     }
@@ -806,11 +816,15 @@ static void serve(int fd)
     std::string program = begin.substr(7);
     /* The content phase runs CGI programs; the hooks (authn, authz, log)   */
     /* run native ones: arguments in, a verdict out.                        */
-    bool hook = phase == OORX_PHASE_AUTHN || phase == OORX_PHASE_AUTHZ ||
-                phase == OORX_PHASE_LOG;
-    bool modrexx = phase == OORX_PHASE_CONTENT && klass == OORX_CLASS_MODREXX;
-    if (!(phase == OORX_PHASE_CONTENT && klass == OORX_CLASS_CGI) &&
-        !(hook && klass == OORX_CLASS_NATIVE) && !modrexx) {
+    /* A modrexx program runs in any phase; its output in a phase that is  */
+    /* not the content goes nowhere, as under mod_rexx (the module drops    */
+    /* it), so it is not a hook in this sense.                              */
+    bool modrexx = klass == OORX_CLASS_MODREXX &&
+                   phase >= OORX_PHASE_CONTENT && phase <= OORX_PHASE_FIXUP;
+    bool hook = klass == OORX_CLASS_NATIVE &&
+                (phase == OORX_PHASE_AUTHN || phase == OORX_PHASE_AUTHZ ||
+                 phase == OORX_PHASE_LOG);
+    if (!(phase == OORX_PHASE_CONTENT && klass == OORX_CLASS_CGI) && !hook && !modrexx) {
         logf_conn("oorexx-host: phase/class not implemented yet for %s", program.c_str());
         send_result(501);
         return;
@@ -842,7 +856,7 @@ static void serve(int fd)
         if (modrexx) kv.push_back(std::make_pair(k, v));
         else setenv(k.c_str(), v.c_str(), 1);
     }
-    if (modrexx) modrexx_load(kv);
+    if (modrexx) { modrexx_load(kv); g_mr.phase = phase; }
 
     /* Like mod_cgi: run in the program's directory; a modrexx program, in   */
     /* Apache's, the root, as under mod_rexx.                                */

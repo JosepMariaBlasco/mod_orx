@@ -1,0 +1,75 @@
+# One case per line: name, path, then curl options (X-Act says what each
+# phase program does; see phase.rex). Run by tests/modrexx-phases.sh.
+static          /s.txt
+content         /Content.rex
+unknown-type    /u.zzz
+pathinfo        /Content.rex/a/b?q=1
+# Return values
+hp-ok           /s.txt            -H "X-Act: HeaderParser.ret=0"
+hp-403          /s.txt            -H "X-Act: HeaderParser.ret=403"
+hp-done         /s.txt            -H "X-Act: HeaderParser.ret=-2"
+hp-noval        /s.txt            -H "X-Act: HeaderParser.ret="
+hp-text         /s.txt            -H "X-Act: HeaderParser.ret=abc"
+access-ok       /s.txt            -H "X-Act: Access.ret=0"
+access-403      /s.txt            -H "X-Act: Access.ret=403"
+access-500      /s.txt            -H "X-Act: Access.ret=500"
+type-ok         /u.zzz            -H "X-Act: Type.ret=0"
+type-ct         /u.zzz            -H "X-Act: Type.ct=text/x-a Type.ret=0"
+type-handler    /u.zzz            -H "X-Act: Type.handler=@H@ Type.ret=0"
+fixup-ok        /s.txt            -H "X-Act: Fixup.ret=0"
+fixup-404       /s.txt            -H "X-Act: Fixup.ret=404"
+fixup-302       /s.txt            -H "X-Act: Fixup.hout=x Fixup.ret=302"
+fixup-done      /s.txt            -H "X-Act: Fixup.ret=-2"
+log-ret         /s.txt            -H "X-Act: Log.ret=500"
+content-decl    /Content.rex      -H "X-Act: Content.ret=-1"
+# Writes, and what the later phases and the response see
+hp-uri          /s.txt            -H "X-Act: HeaderParser.uri=/alt.txt"
+hp-file         /s.txt            -H "X-Act: HeaderParser.file=@D@/alt.txt"
+fixup-file      /s.txt            -H "X-Act: Fixup.file=@D@/alt.txt"
+fixup-ct        /s.txt            -H "X-Act: Fixup.ct=text/x-b"
+fixup-handler   /s.txt            -H "X-Act: Fixup.handler=@H@"
+fixup-h-rex     /Content.rex      -H "X-Act: Fixup.handler=default-handler"
+access-notes    /Content.rex      -H "X-Act: Access.note=n1 Access.env=e1 Access.hin=i1"
+fixup-headers   /s.txt            -H "X-Act: Fixup.hout=o Fixup.xout=x"
+access-hdr-403  /s.txt            -H "X-Act: Access.hout=o Access.xout=x Access.ret=403"
+fixup-status    /s.txt            -H "X-Act: Fixup.status=203"
+# Output, logging, errors
+hp-say          /s.txt            -H "X-Act: HeaderParser.say=1"
+hp-log          /s.txt            -H "X-Act: HeaderParser.log=1"
+hp-syntax       /s.txt            -H "X-Act: HeaderParser.syntax=1"
+fixup-syntax    /s.txt            -H "X-Act: Fixup.syntax=1"
+log-syntax      /s.txt            -H "X-Act: Log.syntax=1"
+# Redirects
+content-redir   /Content.rex      -H "X-Act: Content.redirect=/s.txt"
+fixup-redir     /s.txt            -H "X-Act: Fixup.redirect=/alt.txt"
+# The body in a hook
+fixup-args      /Content.rex      -H "X-Act: Fixup.args=1 Content.args=1" -d "a=1&b=2"
+# Authentication and authorization
+auth-none       /auth/s.txt
+auth-user       /auth/s.txt       -u alice:secret
+auth-bad        /auth/s.txt       -u alice:wrong
+authz-ok        /auth/s.txt       -H "X-Act: Authz.ret=0"
+authz-401       /auth/s.txt       -H "X-Act: Authz.ret=401"
+authz-ok-user   /auth/s.txt       -u alice:secret -H "X-Act: Authz.ret=0"
+authen-403      /auth/s.txt       -u alice:secret -H "X-Act: Authen.ret=403"
+authen-ok       /auth/s.txt       -H "X-Act: Authen.ret=0"
+authen-ok-user  /auth/s.txt       -u alice:secret -H "X-Act: Authen.ret=0"
+# The content program forced by (OoRexx|Rexx)Handler
+forced          /forced/Content.rex
+forced-static   /forced/s.txt
+# HEAD
+head            /Content.rex      -I
+# An AuthType that mod_auth_basic does not take: the authentication hook
+cauth-none      /cauth/s.txt
+cauth-decl      /cauth/s.txt      -H "X-Act: Authz.ret=-1 Authen.ret=-1"
+cauth-ok        /cauth/s.txt      -H "X-Act: Authz.ret=0"
+cauth-401       /cauth/s.txt      -H "X-Act: Authz.ret=401"
+cauth-ok-ok     /cauth/s.txt      -H "X-Act: Authz.ret=0 Authen.ret=0"
+# The two phases where mod_rexx 2.4.0 always crashed Apache's process
+postread-403    /s.txt            -H "X-Act: PostReadRequest.ret=403"
+postread-hin    /Content.rex      -H "X-Act: PostReadRequest.hin=p1"
+trans-file      /s.txt            -H "X-Act: Trans.file=@D@/alt.txt Trans.ret=0"
+trans-uri       /s.txt            -H "X-Act: Trans.uri=/alt.txt"
+# A directory that switches the fixup program off ("none"; for Rexx*, a
+# program called "none", which does not exist, as under mod_rexx)
+nofix           /nofix/s.txt

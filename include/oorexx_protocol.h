@@ -61,9 +61,11 @@ enum {
 #define OORX_FLAG_FLUSH 0x01     /* DATA: flush now                        */
 #define OORX_FLAG_VALUE 0x02     /* RESULT: the program returned a value   */
 
-/* Phases */
+/* Phases: Apache's hooks (authn = check_user_id, authz = auth_checker) */
 enum { OORX_PHASE_CONTENT = 1, OORX_PHASE_AUTHN = 2, OORX_PHASE_AUTHZ = 3,
-       OORX_PHASE_LOG = 4 };
+       OORX_PHASE_LOG = 4, OORX_PHASE_POST_READ = 5, OORX_PHASE_TRANSLATE = 6,
+       OORX_PHASE_HEADER_PARSER = 7, OORX_PHASE_ACCESS = 8,
+       OORX_PHASE_TYPE = 9, OORX_PHASE_FIXUP = 10 };
 
 /* Program classes */
 enum { OORX_CLASS_CGI = 1, OORX_CLASS_MODREXX = 2, OORX_CLASS_NATIVE = 3 };

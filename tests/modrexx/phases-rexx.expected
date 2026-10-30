@@ -1,0 +1,815 @@
+== static
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: static
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== content
+HTTP/1.1 200 OK
+  body: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=
+  phase: PostReadRequest|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Access|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Type|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+== unknown-type
+HTTP/1.1 200 OK
+  body: x
+  phase: PostReadRequest|main=1|uri=/u.zzz|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/u.zzz|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Access|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Type|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Fixup|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Log|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+== pathinfo
+HTTP/1.1 200 OK
+  body: Content|main=1|uri=/Content.rex/a/b|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER
+  phase: PostReadRequest|main=1|uri=/Content.rex/a/b|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/Content.rex|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/Content.rex/a/b|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/Content.rex|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/Content.rex/a/b|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=/a/b|pt=/var/www/oorexx-phases/doc/a|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Access|main=1|uri=/Content.rex/a/b|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=/a/b|pt=/var/www/oorexx-phases/doc/a|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Type|main=1|uri=/Content.rex/a/b|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=/a/b|pt=/var/www/oorexx-phases/doc/a|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Fixup|main=1|uri=/Content.rex/a/b|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=/a/b|pt=/var/www/oorexx-phases/doc/a|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Content|main=1|uri=/Content.rex/a/b|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=/a/b|pt=/var/www/oorexx-phases/doc/a|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Log|main=1|uri=/Content.rex/a/b|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=/a/b|pt=/var/www/oorexx-phases/doc/a|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+== hp-ok
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: static
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== hp-403
+HTTP/1.1 403 Forbidden
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>403 Forbidden</title>
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=403|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== hp-done
+HTTP/1.1 200 OK
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== hp-noval
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: static
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== hp-text
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: static
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== access-ok
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: static
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== access-403
+HTTP/1.1 403 Forbidden
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>403 Forbidden</title>
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=403|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== access-500
+HTTP/1.1 500 Internal Server Error
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>500 Internal Server Error</title>
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== type-ok
+HTTP/1.1 200 OK
+  body: x
+  phase: PostReadRequest|main=1|uri=/u.zzz|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/u.zzz|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Access|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Type|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Fixup|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Log|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+== type-ct
+HTTP/1.1 200 OK
+Content-Type: text/x-a
+  body: x
+  phase: PostReadRequest|main=1|uri=/u.zzz|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/u.zzz|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Access|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Type|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Fixup|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=text/x-a|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Log|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=text/x-a|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+== type-handler
+HTTP/1.1 200 OK
+  phase: PostReadRequest|main=1|uri=/u.zzz|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/u.zzz|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Access|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Type|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Fixup|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  phase: Log|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz
+  log: [orx:error]      1 *-* x
+  log: [orx:error]        >>>   "X"
+  log: [orx:error]        +++   "RC(30)"
+== fixup-ok
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: static
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== fixup-404
+HTTP/1.1 404 Not Found
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>404 Not Found</title>
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=404|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== fixup-302
+HTTP/1.1 302 Found
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>302 Found</title>
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=302|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== fixup-done
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== log-ret
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: static
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== content-decl
+HTTP/1.1 200 OK
+  body: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=
+  body: /* phase.rex -- a mod_rexx program for any phase. It is installed under  */
+  body: /* several names (Trans.rex, Fixup.rex...) and its name is its tag. It   */
+  phase: PostReadRequest|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Access|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Type|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+== hp-uri
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: static
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/alt.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/alt.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/alt.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== hp-file
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: alt
+  body:    
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt
+== fixup-file
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: alt
+  body:    
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt
+== fixup-ct
+HTTP/1.1 200 OK
+Content-Type: text/x-b
+  body: static
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/x-b|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== fixup-handler
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=HANDLER|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  log: [orx:error]      1 *-* static
+  log: [orx:error]        >>>   "STATIC"
+  log: [orx:error]        +++   "RC(30)"
+== fixup-h-rex
+HTTP/1.1 200 OK
+  body: /* phase.rex -- a mod_rexx program for any phase. It is installed under  */
+  body: /* several names (Trans.rex, Fixup.rex...) and its name is its tag. It   */
+  body: /* appends one line to the file in the variable PHLOG with what it sees  */
+  phase: PostReadRequest|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Access|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Type|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=default-handler|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+== access-notes
+HTTP/1.1 200 OK
+  body: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=
+  phase: PostReadRequest|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Access|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Type|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=n1|env=e1|in=i1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=n1|env=e1|in=i1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=n1|env=e1|in=i1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=n1|env=e1|in=i1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+== fixup-headers
+HTTP/1.1 200 OK
+Content-Type: text/plain
+X-Out-Fixup: o
+X-Out-Fixup: x
+  body: static
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== access-hdr-403
+HTTP/1.1 403 Forbidden
+Content-Type: text/html; charset=iso-8859-1
+X-Out-Access: x
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>403 Forbidden</title>
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=403|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== fixup-status
+HTTP/1.1 203 Non-Authoritative Information
+Content-Type: text/plain
+  body: static
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=203|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== hp-say
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: static
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+== hp-log
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: static
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  log: [orx:error] logged in HeaderParser
+== hp-syntax
+HTTP/1.1 500 Internal Server Error
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>500 Internal Server Error</title>
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  log: [orx:error] oorexx-host: /var/www/oorexx-phases/prog/HeaderParser.rex: line 59: Error 41: Bad arithmetic conversion.: Nonnumeric value ("a") used in arithmetic operation.
+== fixup-syntax
+HTTP/1.1 500 Internal Server Error
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>500 Internal Server Error</title>
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  log: [orx:error] oorexx-host: /var/www/oorexx-phases/prog/Fixup.rex: line 59: Error 41: Bad arithmetic conversion.: Nonnumeric value ("a") used in arithmetic operation.
+== log-syntax
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: static
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  log: [orx:error] oorexx-host: /var/www/oorexx-phases/prog/Log.rex: line 59: Error 41: Bad arithmetic conversion.: Nonnumeric value ("a") used in arithmetic operation.
+== content-redir
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: static
+  phase: PostReadRequest|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Access|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Type|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+== fixup-redir
+HTTP/1.1 500 Internal Server Error
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>500 Internal Server Error</title>
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt
+  log: [orx:error] oorexx-host: WWWInternal_Redirect is only available in the content phase
+  log: [orx:error] oorexx-host: /var/www/oorexx-phases/prog/Fixup.rex: line 60: Error 40: Incorrect call to routine.: External routine "WWWINTERNAL_REDIRECT" failed.
+== fixup-args
+HTTP/1.1 200 OK
+  body: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=
+  phase: PostReadRequest|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Access|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Type|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|args=2|post=a=1&b=2
+  phase: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|args=0|post=
+  phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+== auth-none
+HTTP/1.1 401 Unauthorized
+Content-Type: text/html; charset=iso-8859-1
+WWW-Authenticate: Basic realm="ph"
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>401 Unauthorized</title>
+  phase: PostReadRequest|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=401|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+== auth-user
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: private
+  phase: PostReadRequest|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Authen|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Fixup|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/plain|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/plain|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+== auth-bad
+HTTP/1.1 401 Unauthorized
+Content-Type: text/html; charset=iso-8859-1
+WWW-Authenticate: Basic realm="ph"
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>401 Unauthorized</title>
+  phase: PostReadRequest|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=alice|status=401|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.html": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.cgi": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.pl": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.php": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.xhtml": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.htm": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.html": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.cgi": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.pl": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.php": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.xhtml": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.htm": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/s.txt": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.html": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.cgi": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.pl": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.php": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.xhtml": Password Mismatch
+  log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.htm": Password Mismatch
+== authz-ok
+HTTP/1.1 401 Unauthorized
+Content-Type: text/html; charset=iso-8859-1
+WWW-Authenticate: Basic realm="ph"
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>401 Unauthorized</title>
+  phase: PostReadRequest|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=401|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+== authz-401
+HTTP/1.1 401 Unauthorized
+Content-Type: text/html; charset=iso-8859-1
+WWW-Authenticate: Basic realm="ph"
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>401 Unauthorized</title>
+  phase: PostReadRequest|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=401|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+== authz-ok-user
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: private
+  phase: PostReadRequest|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Authen|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Fixup|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/plain|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/plain|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+== authen-403
+HTTP/1.1 403 Forbidden
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>403 Forbidden</title>
+  phase: PostReadRequest|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Authen|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=alice|status=403|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+== authen-ok
+HTTP/1.1 401 Unauthorized
+Content-Type: text/html; charset=iso-8859-1
+WWW-Authenticate: Basic realm="ph"
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>401 Unauthorized</title>
+  phase: PostReadRequest|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=401|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+== authen-ok-user
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: private
+  phase: PostReadRequest|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/auth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Authen|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Fixup|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/plain|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+  phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/plain|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt
+== forced
+HTTP/1.1 200 OK
+  body: Forced|main=1|uri=/forced/Content.rex|file=/var/www/oorexx-phases/doc/forced/Content.rex|handler=rex
+  phase: PostReadRequest|main=1|uri=/forced/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/forced/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/forced/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/forced/|note=|env=|in=|stm=0|wfile=
+== forced-static
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: f
+  phase: PostReadRequest|main=1|uri=/forced/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/forced/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/forced/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/forced/|note=|env=|in=|stm=0|wfile=
+== head
+HTTP/1.1 200 OK
+Content-Type: text/html
+  body: HTTP/1.1 200 OK
+  body: Server: Apache/2.4.58 (Ubuntu)
+  body: Content-Type: text/html
+  phase: PostReadRequest|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Access|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Type|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=text/html|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+== cauth-none
+HTTP/1.1 500 Internal Server Error
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>500 Internal Server Error</title>
+  phase: PostReadRequest|main=1|uri=/cauth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/cauth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Access|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Authz|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Log|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+== cauth-decl
+HTTP/1.1 500 Internal Server Error
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>500 Internal Server Error</title>
+  phase: PostReadRequest|main=1|uri=/cauth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/cauth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Access|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Authz|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Log|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+== cauth-ok
+HTTP/1.1 500 Internal Server Error
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>500 Internal Server Error</title>
+  phase: PostReadRequest|main=1|uri=/cauth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/cauth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Access|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Authz|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Log|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [core:error] AH00027: No authentication done but request not allowed without authentication for /cauth/s.txt. Authentication not configured?
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+== cauth-401
+HTTP/1.1 401 Unauthorized
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>401 Unauthorized</title>
+  phase: PostReadRequest|main=1|uri=/cauth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/cauth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Access|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Authz|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Log|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=401|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+== cauth-ok-ok
+HTTP/1.1 500 Internal Server Error
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>500 Internal Server Error</title>
+  phase: PostReadRequest|main=1|uri=/cauth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/cauth/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Access|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Authz|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  phase: Log|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [core:error] AH00027: No authentication done but request not allowed without authentication for /cauth/s.txt. Authentication not configured?
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+  log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
+== postread-403
+HTTP/1.1 403 Forbidden
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>403 Forbidden</title>
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Log|main=1|uri=/s.txt|file=|handler=|ct=text/html; charset=iso-8859-1|user=|status=403|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+== postread-hin
+HTTP/1.1 200 OK
+  body: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=
+  phase: PostReadRequest|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=p1|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=p1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Access|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=p1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Type|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=p1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=p1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=p1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+  phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=p1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex
+== trans-file
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: alt
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt
+  phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt
+  phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt
+  phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt
+== trans-uri
+HTTP/1.1 200 OK
+Content-Type: text/plain
+  body: alt
+  phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=
+  phase: HeaderParser|main=1|uri=/alt.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt
+  phase: Access|main=1|uri=/alt.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt
+  phase: Fixup|main=1|uri=/alt.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt
+  phase: Log|main=1|uri=/alt.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt
+== nofix
+HTTP/1.1 500 Internal Server Error
+Content-Type: text/html; charset=iso-8859-1
+  body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+  body: <html><head>
+  body: <title>500 Internal Server Error</title>
+  phase: PostReadRequest|main=1|uri=/nofix/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/nofix/|note=|env=|in=|stm=0|wfile=
+  phase: Trans|main=1|uri=/nofix/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/nofix/|note=|env=|in=|stm=0|wfile=
+  log: [orx:error] oorexx-host: none: line 0: Error 3: Failure during initialization.: Failure during initialization: Program "none" was not found.
