@@ -1,4 +1,4 @@
-# mod_oorexx -- build the Apache module and the Rexx host.
+# mod_orx -- build the Apache module and the Rexx host.
 #
 #   make                  build both
 #   make install          install both (needs root)
@@ -13,10 +13,10 @@ BINDIR        ?= /usr/local/bin
 
 all: module host
 
-module: module/.libs/mod_oorexx.so
+module: module/.libs/mod_orx.so
 
-module/.libs/mod_oorexx.so: module/mod_oorexx.c include/oorexx_protocol.h build/config.h
-	$(APXS) -c -Wc,-Wall module/mod_oorexx.c
+module/.libs/mod_orx.so: module/mod_orx.c include/oorexx_protocol.h build/config.h
+	$(APXS) -c -Wc,-Wall module/mod_orx.c
 
 # Where the module looks for oorexx-host when OoRexxHost is not set.
 build/config.h: Makefile
@@ -32,7 +32,7 @@ build/oorexx-host: host/oorexx-host.cpp include/oorexx_protocol.h
 	    -Wl,-rpath,$(OOREXX_PREFIX)/lib -lrexx -lrexxapi -lpthread
 
 install: all
-	$(APXS) -i -n oorexx module/.libs/mod_oorexx.so
+	$(APXS) -i -n orx module/.libs/mod_orx.so
 	install -m 755 build/oorexx-host $(BINDIR)/oorexx-host
 
 clean:

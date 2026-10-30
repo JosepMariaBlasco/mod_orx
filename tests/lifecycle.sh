@@ -3,7 +3,7 @@
 # an upgraded module, crashes of each process, growth of the pool, and stop.
 #
 # Run after tests/rexxhttp-suite.sh, which leaves Apache configured with
-# mod_oorexx (any MPM). Needs the module's source tree (it rebuilds the
+# mod_orx (any MPM). Needs the module's source tree (it rebuilds the
 # module to check an upgrade) and runs as root.
 #
 #   tests/lifecycle.sh
@@ -74,8 +74,8 @@ echo "== Upgraded module, then graceful and hard restarts"
 for k in graceful restart; do
     rm -rf module/.libs module/*.lo module/*.slo
     if [ $k = graceful ]; then X=-Wc,-O0; else X=; fi
-    apxs -c -Wc,-Wall $X module/mod_oorexx.c >/dev/null 2>&1 &&
-        apxs -i -n oorexx module/.libs/mod_oorexx.so >/dev/null 2>&1
+    apxs -c -Wc,-Wall $X module/mod_orx.c >/dev/null 2>&1 &&
+        apxs -i -n orx module/.libs/mod_orx.so >/dev/null 2>&1
     get 'slow.rex?s=2' > /tmp/lc.1 &
     sleep 0.5; apachectl -k $k; wait; sleep 3
     check "Apache's parent survives a $k after an upgrade" "$(kill -0 "$P" 2>/dev/null && echo alive)" alive
@@ -93,7 +93,7 @@ kill -9 "$(master)"; sleep 2
 check "the host's master killed: restarted" "$(get slow.rex)" 200
 kill -9 "$(keeper)"; sleep 2
 check "the host's keeper killed: restarted" "$(get slow.rex)" 200
-check "  ...one log line each" "$(grep -c 'mod_oorexx: oorexx-host .*restarting it' "$LOG")" 2
+check "  ...one log line each" "$(grep -c 'mod_orx: oorexx-host .*restarting it' "$LOG")" 2
 
 echo "== The pool grows and stays within its maximum"
 MAX=$(ps -eo args | awk '/[o]orexx-host --listen/ {for (i=1;i<NF;i++) if ($i=="--max-processes") print $(i+1); exit}')

@@ -1,5 +1,5 @@
 /*
- * mod_oorexx -- run ooRexx programs from Apache, with the Rexx code in
+ * mod_orx -- run ooRexx programs from Apache, with the Rexx code in
  * separate processes (oorexx-host) and only the hooks inside Apache.
  *
  * Copyright 2026 Josep Maria Blasco
@@ -17,7 +17,7 @@
  *     if it dies, and drains it on every restart and stop of Apache, so that
  *     requests in flight finish while the new generation already serves.
  *
- *   LoadModule oorexx_module modules/mod_oorexx.so
+ *   LoadModule orx_module modules/mod_orx.so
  *   OoRexxHost /usr/local/bin/oorexx-host     # or "none": started by hand
  *   OoRexxProcesses 2 8                       # min max
  *   OoRexxMaxRequests 1000                    # phases per host process
@@ -51,7 +51,7 @@
 #include "../include/oorexx_protocol.h"
 #include "../build/config.h"   /* OORX_DEFAULT_HOST, written by make */
 
-module AP_MODULE_DECLARE_DATA oorexx_module;
+module AP_MODULE_DECLARE_DATA orx_module;
 
 #define DEFAULT_TIMEOUT 60
 #define DEFAULT_SOCKET        "oorexx.sock"   /* in DefaultRuntimeDir */
@@ -214,7 +214,7 @@ static int start_host(oorx_gen *g)
 {
     pid_t pid = fork();
     if (pid < 0) {
-        ap_log_error(APLOG_MARK, APLOG_CRIT, errno, g->s, "mod_oorexx: cannot fork oorexx-host");
+        ap_log_error(APLOG_MARK, APLOG_CRIT, errno, g->s, "mod_orx: cannot fork oorexx-host");
         return -1;
     }
     if (pid == 0) {
@@ -251,7 +251,7 @@ static int start_host(oorx_gen *g)
     g->running = 1;
     apr_proc_other_child_register(&g->proc, host_maint, g, NULL, g->pool);
     ap_log_error(APLOG_MARK, APLOG_INFO, 0, g->s,
-                 "mod_oorexx: oorexx-host started (pid %ld) on %s", (long)pid, g->path);
+                 "mod_orx: oorexx-host started (pid %ld) on %s", (long)pid, g->path);
     return 0;
 }
 
@@ -270,12 +270,12 @@ static void host_maint(int reason, void *data, apr_wait_t status)
         if (reason == APR_OC_REASON_DEATH &&
             (status == HOST_EXIT_CONFIG || status == 127)) {
             ap_log_error(APLOG_MARK, APLOG_CRIT, 0, g->s,
-                         "mod_oorexx: oorexx-host (%s) could not start (status %d); "
+                         "mod_orx: oorexx-host (%s) could not start (status %d); "
                          "not restarting it", g->host, (int)status);
             break;
         }
         ap_log_error(APLOG_MARK, APLOG_ERR, 0, g->s,
-                     "mod_oorexx: oorexx-host (pid %ld) %s (status %d); restarting it",
+                     "mod_orx: oorexx-host (pid %ld) %s (status %d); restarting it",
                      (long)g->proc.pid,
                      reason == APR_OC_REASON_LOST ? "was lost" : "ended", (int)status);
         start_host(g);
@@ -322,7 +322,7 @@ static int bind_socket(server_rec *s, const char *path)
     struct sockaddr_un sa;
     int fd;
     if (strlen(path) >= sizeof sa.sun_path) {
-        ap_log_error(APLOG_MARK, APLOG_CRIT, 0, s, "mod_oorexx: socket path too long: %s", path);
+        ap_log_error(APLOG_MARK, APLOG_CRIT, 0, s, "mod_orx: socket path too long: %s", path);
         return -1;
     }
     memset(&sa, 0, sizeof sa);
@@ -330,7 +330,7 @@ static int bind_socket(server_rec *s, const char *path)
     strcpy(sa.sun_path, path);
     fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) {
-        ap_log_error(APLOG_MARK, APLOG_CRIT, errno, s, "mod_oorexx: cannot create a socket");
+        ap_log_error(APLOG_MARK, APLOG_CRIT, errno, s, "mod_orx: cannot create a socket");
         return -1;
     }
     /* Workers fork without exec and close it in child_init; anything     */
@@ -338,7 +338,7 @@ static int bind_socket(server_rec *s, const char *path)
     fcntl(fd, F_SETFD, FD_CLOEXEC);
     unlink(path);
     if (bind(fd, (struct sockaddr *)&sa, sizeof sa) < 0) {
-        ap_log_error(APLOG_MARK, APLOG_CRIT, errno, s, "mod_oorexx: cannot bind %s", path);
+        ap_log_error(APLOG_MARK, APLOG_CRIT, errno, s, "mod_orx: cannot bind %s", path);
         close(fd);
         return -1;
     }
@@ -346,7 +346,7 @@ static int bind_socket(server_rec *s, const char *path)
     if (chmod(path, 0600) < 0 ||
         (geteuid() == 0 && chown(path, ap_unixd_config.user_id, ap_unixd_config.group_id) < 0) ||
         listen(fd, 1024) < 0) {
-        ap_log_error(APLOG_MARK, APLOG_CRIT, errno, s, "mod_oorexx: cannot set up %s", path);
+        ap_log_error(APLOG_MARK, APLOG_CRIT, errno, s, "mod_orx: cannot set up %s", path);
         close(fd);
         unlink(path);
         return -1;
@@ -393,7 +393,7 @@ static int oorx_post_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *pte
     g->host = apr_pstrdup(pp, g_host ? g_host : OORX_DEFAULT_HOST);
     if (access(g->host, X_OK) < 0) {
         ap_log_error(APLOG_MARK, APLOG_CRIT, errno, s,
-                     "mod_oorexx: OoRexxHost %s is not an executable file", g->host);
+                     "mod_orx: OoRexxHost %s is not an executable file", g->host);
         return HTTP_INTERNAL_SERVER_ERROR;
     }
     if ((g->lfd = bind_socket(s, g->path)) < 0) return HTTP_INTERNAL_SERVER_ERROR;
@@ -460,7 +460,7 @@ static int connect_host(request_rec *r, const char *path, int timeout)
         if ((errno != ENOENT && errno != ECONNREFUSED && errno != EAGAIN) ||
             waited >= CONNECT_BUDGET) {
             ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r,
-                          "mod_oorexx: cannot connect to oorexx-host at %s", path);
+                          "mod_orx: cannot connect to oorexx-host at %s", path);
             close(fd);
             return -1;
         }
@@ -536,7 +536,7 @@ static int pump(oorx_conn *c)
         }
         default:
             ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, c->r,
-                          "mod_oorexx: unexpected frame type %d from oorexx-host", type);
+                          "mod_orx: unexpected frame type %d from oorexx-host", type);
             c->failed = 1;
         }
     }
@@ -603,33 +603,33 @@ static int oorx_cgi_handler(request_rec *r)
 
     if (strcmp(r->handler, "oorexx-cgi")) return DECLINED;
 
-    dcfg = ap_get_module_config(r->per_dir_config, &oorexx_module);
+    dcfg = ap_get_module_config(r->per_dir_config, &orx_module);
     timeout = dcfg->timeout > 0 ? dcfg->timeout : DEFAULT_TIMEOUT;
 
     /* The same preconditions as mod_cgi, with the same answers. */
     if (!(ap_allow_options(r) & OPT_EXECCGI)) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-                      "mod_oorexx: Options ExecCGI is off in this directory: %s", r->filename);
+                      "mod_orx: Options ExecCGI is off in this directory: %s", r->filename);
         return HTTP_FORBIDDEN;
     }
     if (r->used_path_info == AP_REQ_REJECT_PATH_INFO && r->path_info && *r->path_info) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-                      "mod_oorexx: AcceptPathInfo off disallows user's path: %s", r->path_info);
+                      "mod_orx: AcceptPathInfo off disallows user's path: %s", r->path_info);
         return HTTP_NOT_FOUND;
     }
     if (r->finfo.filetype == APR_NOFILE) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-                      "mod_oorexx: script not found or unable to stat: %s", r->filename);
+                      "mod_orx: script not found or unable to stat: %s", r->filename);
         return HTTP_NOT_FOUND;
     }
     if (r->finfo.filetype == APR_DIR) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-                      "mod_oorexx: attempt to invoke directory as script: %s", r->filename);
+                      "mod_orx: attempt to invoke directory as script: %s", r->filename);
         return HTTP_FORBIDDEN;
     }
     if (!g_socket_path) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-                      "mod_oorexx: OoRexxHost is none and OoRexxSocket is not set");
+                      "mod_orx: OoRexxHost is none and OoRexxSocket is not set");
         return HTTP_INTERNAL_SERVER_ERROR;
     }
 
@@ -662,7 +662,7 @@ static int oorx_cgi_handler(request_rec *r)
     memcpy(begin + 7, r->filename, plen);
     if (oorx_send(c->fd, OORX_BEGIN, 0, begin, (uint32_t)(7 + plen)) < 0 ||
         oorx_send(c->fd, OORX_VARS, 0, vars, (uint32_t)vlen) < 0) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r, "mod_oorexx: cannot talk to oorexx-host");
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r, "mod_orx: cannot talk to oorexx-host");
         return HTTP_SERVICE_UNAVAILABLE;
     }
 
@@ -699,7 +699,7 @@ static int oorx_cgi_handler(request_rec *r)
     }
     if (c->failed && !c->done)
         ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r,
-                      "mod_oorexx: connection to oorexx-host lost before the end of %s",
+                      "mod_orx: connection to oorexx-host lost before the end of %s",
                       r->filename);
     return OK;
 }
@@ -713,7 +713,7 @@ static void register_hooks(apr_pool_t *p)
     ap_hook_handler(oorx_cgi_handler, NULL, NULL, APR_HOOK_MIDDLE);
 }
 
-AP_DECLARE_MODULE(oorexx) = {
+AP_DECLARE_MODULE(orx) = {
     STANDARD20_MODULE_STUFF,
     create_dir_cfg,
     merge_dir_cfg,

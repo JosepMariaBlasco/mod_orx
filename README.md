@@ -1,4 +1,4 @@
-# mod_ooRexx
+# mod_orx
 
 An Apache HTTP Server module for [ooRexx](https://sourceforge.net/projects/oorexx/):
 Rexx programs as CGI scripts without a fork per request, and, later, Rexx
@@ -23,9 +23,9 @@ single child process on Windows). Running Rexx inside Apache's workers
 would therefore serialise it, mix the state of concurrent requests, and let
 one failing program take a worker down with all its connections.
 
-So mod_ooRexx is two pieces:
+So mod_orx is two pieces:
 
-- **`mod_oorexx.so`**, a thin module inside Apache. It registers the hooks
+- **`mod_orx.so`**, a thin module inside Apache. It registers the hooks
   and talks to the host over a local socket. It does not link ooRexx.
 - **`oorexx-host`**, a pool of processes outside Apache. Each process
   serves one phase of one request at a time, in a **fresh interpreter
@@ -78,6 +78,9 @@ one go gets a `Content-Length`.
   Apache License 2.0. It keeps the idea that made mod_rexx valuable (Rexx
   at every phase of the request), not its code.
 
+The name keeps clear of that unreleased mod_ooRexx. `orx` was the original
+file type for Oryx, the internal product name of what became ooRexx.
+
 ## Building
 
 Requirements:
@@ -94,7 +97,7 @@ sudo make install            # APXS=... OOREXX_PREFIX=... if needed
 ## Configuring
 
 ```apache
-LoadModule oorexx_module modules/mod_oorexx.so
+LoadModule orx_module modules/mod_orx.so
 OoRexxTimeout 60
 
 <Directory "/var/www/html/rexx">
@@ -126,7 +129,7 @@ sudo -u www-data oorexx-host --socket /run/oorexx/host.sock --processes 2
 ## Testing
 
 `tests/rexxhttp-suite.sh /path/to/rexxhttp` deploys the RexxHTTP suite,
-swaps mod_cgid for mod_oorexx and runs the suite unchanged. Result, under
+swaps mod_cgid for mod_orx and runs the suite unchanged. Result, under
 both event and prefork: 182 tests, 313 assertions, 0 failures, 0 errors,
 empty error.log, the same counts as under mod_cgid. `OOREXX_PROCESSES` and
 `OOREXX_MAX_REQUESTS` change the pool for the run (the suite also passes

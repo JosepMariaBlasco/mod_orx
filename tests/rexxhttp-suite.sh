@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run the RexxHTTP HTTP test suite through mod_oorexx instead of mod_cgid.
+# Run the RexxHTTP HTTP test suite through mod_orx instead of mod_cgid.
 #
 # RexxHTTP's own runner deploys its sources, fixtures and Apache config with
 # the standard CGI setup (mod_cgid). This script then swaps the CGI handler
@@ -12,7 +12,7 @@
 # OOREXX_PROCESSES ("min max") and OOREXX_MAX_REQUESTS override the pool's
 # configuration.
 #
-# Requirements: Debian/Ubuntu Apache (a2enmod & co.), ooRexx, mod_oorexx and
+# Requirements: Debian/Ubuntu Apache (a2enmod & co.), ooRexx, mod_orx and
 # oorexx-host installed (make install), a RexxHTTP checkout, run as root.
 #
 #   tests/rexxhttp-suite.sh /path/to/rexxhttp
@@ -35,18 +35,18 @@ echo "== Deploying the RexxHTTP suite (standard CGI setup)"
 a2enmod cgid actions >/dev/null
 (cd "$REXXHTTP" && rexx tests/http/RunHTTPTests.rex --setup-only </dev/null)
 
-echo "== Swapping mod_cgid for mod_oorexx"
+echo "== Swapping mod_cgid for mod_orx"
 sed -i 's/AddHandler cgi-script \.rex/AddHandler oorexx-cgi .rex/; s/^ScriptAlias /Alias /' "$CONF"
-cat > /etc/apache2/mods-available/oorexx.load <<EOF
-LoadModule oorexx_module $(apxs -q LIBEXECDIR)/mod_oorexx.so
+cat > /etc/apache2/mods-available/orx.load <<EOF
+LoadModule orx_module $(apxs -q LIBEXECDIR)/mod_orx.so
 EOF
-cat > /etc/apache2/mods-available/oorexx.conf <<EOF
+cat > /etc/apache2/mods-available/orx.conf <<EOF
 OoRexxHost $(command -v oorexx-host)
 OoRexxProcesses ${OOREXX_PROCESSES:-2 8}
 OoRexxMaxRequests ${OOREXX_MAX_REQUESTS:-1000}
 OoRexxTimeout 30
 EOF
-a2enmod oorexx >/dev/null
+a2enmod orx >/dev/null
 a2dismod -f cgid >/dev/null 2>&1 || true
 
 apachectl -k restart

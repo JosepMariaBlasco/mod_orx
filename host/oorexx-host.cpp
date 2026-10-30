@@ -1,5 +1,5 @@
 /*
- * oorexx-host -- runs Rexx programs on behalf of mod_oorexx.
+ * oorexx-host -- runs Rexx programs on behalf of mod_orx.
  *
  * Copyright 2026 Josep Maria Blasco
  * Licensed under the Apache License, Version 2.0 (see LICENSE).
@@ -9,7 +9,7 @@
  *   - A master process forks a pool of children on one Unix socket, and
  *     grows and shrinks it between a minimum and a maximum. The master
  *     never touches ooRexx: it only keeps the pool alive. Normally
- *     mod_oorexx starts the master, with a socket it has already bound
+ *     mod_orx starts the master, with a socket it has already bound
  *     (--listen-fd); for debugging it can be started by hand (--socket).
  *   - Every child accepts on the SAME socket; the kernel hands each
  *     connection to an idle child. A child serves one connection at a time.
@@ -546,7 +546,7 @@ static void usage(const char *argv0)
         "       [--max-processes MAX] [--max-requests N] [--grace SECONDS]\n", argv0);
 }
 
-/* Exit status 2 means "the configuration is wrong": mod_oorexx does not    */
+/* Exit status 2 means "the configuration is wrong": mod_orx does not       */
 /* restart a host that exits with it, since it would only fail again.       */
 #define EXIT_CONFIG 2
 
@@ -588,7 +588,7 @@ int main(int argc, char **argv)
         }
         chmod(path, 0600);
     } else {
-        /* Managed by mod_oorexx: the module created, bound and secured the */
+        /* Managed by mod_orx: the module created, bound and secured the    */
         /* socket (as root, in Apache's run-time directory) and owns its    */
         /* path; we only accept on it.                                      */
         int type = 0; socklen_t tl = sizeof type;

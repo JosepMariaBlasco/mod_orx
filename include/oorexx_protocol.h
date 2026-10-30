@@ -1,5 +1,5 @@
 /*
- * oorexx_protocol.h -- the wire protocol between mod_oorexx (the Apache
+ * oorexx_protocol.h -- the wire protocol between mod_orx (the Apache
  * module) and oorexx-host (the process that runs Rexx).
  *
  * Copyright 2026 Josep Maria Blasco

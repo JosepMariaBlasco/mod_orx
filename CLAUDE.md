@@ -1,6 +1,6 @@
 # Working on this repository
 
-mod_oorexx: an Apache module that runs ooRexx programs, with the Rexx code
+mod_orx: an Apache module that runs ooRexx programs, with the Rexx code
 in separate processes (`oorexx-host`) and only the hooks inside Apache.
 The design notes, the measurements behind them and the decision log live in
 the maintainer's private project state, not here; README.md summarises them.
