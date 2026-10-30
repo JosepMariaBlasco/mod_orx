@@ -10,7 +10,8 @@ the full [RexxHTTP](https://rexx.epbcn.com/rexxhttp/) HTTP test suite
 unchanged, in place of mod_cgid, under both the event and the prefork MPM.
 Apache starts, watches and restarts the host itself. Rexx programs can also
 authenticate users, authorize requests and log them, through Apache's own
-provider mechanisms. The remaining phases, the native and
+provider mechanisms. Large packages such as RexxHTTP's classes can be
+preloaded once per host process. The remaining phases, the native and
 mod_rexx-compatible program classes, and Windows are still to come. Not for
 production yet.
 
@@ -118,10 +119,47 @@ OoRexxTimeout 60
 | `OoRexxTimeout seconds` | `60` | Deadline of a phase; also valid per directory. A drained host gets the largest one, plus 10 seconds, before what is left is killed. |
 | `OoRexxAuthnProgram path` | none | The program behind `AuthBasicProvider oorexx`. Per directory. |
 | `OoRexxLogHook path` \| `none` | none | A program to run in the logging phase. Per directory; `none` switches off an inherited one. |
+| `OoRexxPreload file...` | none | Rexx packages every host process loads once, when it starts (see below). May be repeated. |
 
-`OoRexxHost`, `OoRexxSocket`, `OoRexxProcesses` and `OoRexxMaxRequests` are
-global: they cannot appear inside `<VirtualHost>`.
+`OoRexxHost`, `OoRexxSocket`, `OoRexxProcesses`, `OoRexxMaxRequests` and
+`OoRexxPreload` are global: they cannot appear inside `<VirtualHost>`.
 Program paths are relative to `ServerRoot`, as in `ScriptAlias`.
+
+### Preloading packages
+
+Every phase runs in a fresh interpreter instance, and a program that
+`::Requires` a large package loads and parses it again every time. With
+`OoRexxPreload`, each host process loads the given packages once, when it
+starts, in an instance it keeps alive; a program that requires one of them
+finds it already loaded.
+
+```apache
+OoRexxPreload /srv/rexxhttp/HTTP.Request.cls /srv/rexxhttp/HTTP.Response.cls \
+              /srv/rexxhttp/HTTP.OutputStream.cls /srv/rexxhttp/HTTP.Cookie.cls
+```
+
+For RexxHTTP this is most of the cost of a request: loading its four classes
+takes about 4.6 ms per instance, and 0.34 ms when they are preloaded. A
+RexxHTTP page served by `oorexx-cgi` went from about 190–270 to about 870
+requests per second (two cores, `ab -c 4`).
+
+What is shared, and what is not:
+
+- A preloaded package is loaded once per host process, and every phase that
+  process serves uses that same copy: if its classes keep state of their own
+  (class variables), that state carries over from one phase to the next.
+  RexxHTTP's classes keep none.
+- A package that is not preloaded (a program's own) is still loaded afresh in
+  every phase, with its state starting from scratch, as in a CGI.
+- Code in a preloaded package sees the `.local`, `.output` and other streams
+  of the phase that calls it, not those of the instance that loaded it.
+
+A preloaded file that changes on disk is seen only by new host processes:
+after deploying a new version, restart Apache (`apachectl graceful` is
+enough). A file that does not exist is refused when the configuration is
+read; one that fails to load (a syntax error, say) stops the host, with the
+error, its file and its line in the error log, and the host is not
+restarted.
 
 ### Authentication, authorization and logging
 
@@ -182,7 +220,8 @@ swaps mod_cgid for mod_orx and runs the suite unchanged. Result, under
 both event and prefork: 182 tests, 313 assertions, 0 failures, 0 errors,
 empty error.log, the same counts as under mod_cgid. `OOREXX_PROCESSES` and
 `OOREXX_MAX_REQUESTS` change the pool for the run (the suite also passes
-with a single process replaced after every phase).
+with a single process replaced after every phase), and `OOREXX_PRELOAD=1`
+preloads RexxHTTP's classes (the suite passes either way).
 
 `tests/lifecycle.sh`, run after the suite, checks the host's life cycle:
 graceful restarts with requests in flight, an upgraded module followed by a
@@ -193,6 +232,10 @@ of the pool up to its maximum, and a stop with a program still running.
 authorization and logging, alone and combined with Apache's own providers
 (`AuthBasicProvider ... file`, `RequireAny`, `RequireAll`, `Require ip`),
 including errors, timeouts and the error log.
+
+`tests/preload.sh`, run after the suite, checks `OoRexxPreload`: what a
+preloaded package shares between phases and what a program's own package
+does not, a missing file, and a file that fails to load.
 
 ## License
 

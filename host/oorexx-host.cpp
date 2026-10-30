@@ -29,6 +29,15 @@
  *     passes. It only ever uses the INSTANCE API: using a thread context
  *     from a thread other than its own aborts the process (measured).
  *
+ *   - With --preload, every child keeps one instance alive (the ANCHOR) in
+ *     which it has loaded the given packages once. While an instance lives,
+ *     the interpreter does not reset between phases, and a program that
+ *     ::Requires one of those packages finds it already loaded (measured:
+ *     RexxHTTP's four classes, 4.6 ms -> 0.34 ms per phase). Only what the
+ *     anchor loaded is shared; a program's own packages are still loaded
+ *     afresh in every phase. A changed preloaded file is seen only by new
+ *     processes (a restart of Apache, or recycling).
+ *
  *   - SIGTERM drains: no child accepts anything new, the children finish
  *     what they hold and what is queued, and the master exits; after
  *     --grace seconds whatever is left is killed.
@@ -36,6 +45,7 @@
  * Usage:
  *   oorexx-host (--socket PATH | --listen-fd N) [--processes MIN]
  *               [--max-processes MAX] [--max-requests N] [--grace SECONDS]
+ *               [--preload FILE]...
  */
 
 #include <oorexxapi.h>
@@ -523,6 +533,58 @@ static int  slot_get(int i)        { return __atomic_load_n(&g_slots[i].state, _
 #define MASTER_TICK_MS   200
 #define SHRINK_AFTER_MS  10000
 
+/* Exit status 2 means "the configuration is wrong": mod_orx does not       */
+/* restart a host that exits with it, since it would only fail again.       */
+#define EXIT_CONFIG 2
+
+static std::vector<std::string> g_preload;   /* --preload FILE, in order    */
+
+/* The anchor: an instance that is never terminated, with the preloaded     */
+/* packages loaded in it by a program made of one ::Requires per file. It   */
+/* lives in the child's main thread, like every instance of the child, and  */
+/* the watchdog never sees it. A package that fails to load is a            */
+/* configuration error: the child exits with EXIT_CONFIG, and the master    */
+/* with it.                                                                 */
+static void load_anchor(void)
+{
+    RexxInstance *inst; RexxThreadContext *tc;
+    if (!RexxCreateInterpreter(&inst, &tc, NULL)) {
+        fprintf(stderr, "oorexx-host: cannot create the preload instance\n");
+        _exit(EXIT_CONFIG);
+    }
+    std::string src = "return\n";
+    for (size_t i = 0; i < g_preload.size(); i++) {
+        std::string q;
+        for (char ch : g_preload[i]) { q += ch; if (ch == '"') q += '"'; }
+        src += "::requires \"" + q + "\"\n";
+    }
+    RexxRoutineObject r = tc->NewRoutine("oorexx-host preload", src.data(), src.size());
+    /* Held for good: the routine keeps the packages it required loaded.  */
+    if (r != NULLOBJECT) tc->RequestGlobalReference(r);
+    if (r != NULLOBJECT && !tc->CheckCondition()) tc->CallRoutine(r, NULL);
+    if (r == NULLOBJECT || tc->CheckCondition()) {
+        RexxCondition c;
+        std::string m = "oorexx-host: OoRexxPreload failed";
+        RexxDirectoryObject ci = tc->GetConditionInfo();
+        if (ci != NULLOBJECT) {
+            tc->DecodeConditionInfo(ci, &c);
+            char n[64];
+            snprintf(n, sizeof n, ": Error %d", (int)c.rc);
+            m += n;
+            if (c.program != NULLOBJECT) {
+                snprintf(n, sizeof n, " at line %d", (int)c.position);
+                m += " in "; m += tc->CString(c.program); m += n;
+            }
+            if (c.errortext != NULLOBJECT) { m += ": "; m += tc->CString(c.errortext); }
+            if (c.message != NULLOBJECT)   { m += ": "; m += tc->CString(c.message); }
+        }
+        /* One write: every child fails alike, and lines must not mix.     */
+        m += "\n";
+        if (write(2, m.data(), m.size()) < 0) { /* nowhere else to say it */ }
+        _exit(EXIT_CONFIG);
+    }
+}
+
 static void child_main(int me, pid_t master, int lsock, int stopfd, int max_requests)
 {
 #ifdef __linux__
@@ -536,8 +598,12 @@ static void child_main(int me, pid_t master, int lsock, int stopfd, int max_requ
     pthread_create(&t, NULL, watchdog, NULL);
 
     /* Pre-warm: the first instance of a process is the expensive one.      */
-    RexxInstance *inst; RexxThreadContext *tc;
-    if (RexxCreateInterpreter(&inst, &tc, NULL)) inst->Terminate();
+    /* With --preload, the anchor is that first instance, and it stays.     */
+    if (!g_preload.empty()) load_anchor();
+    else {
+        RexxInstance *inst; RexxThreadContext *tc;
+        if (RexxCreateInterpreter(&inst, &tc, NULL)) inst->Terminate();
+    }
     if (!slot_cas(me, SLOT_STARTING, SLOT_IDLE)) _exit(0);
 
     bool draining = false;
@@ -595,12 +661,9 @@ static void usage(const char *argv0)
 {
     fprintf(stderr,
         "usage: %s (--socket PATH | --listen-fd N) [--processes MIN]\n"
-        "       [--max-processes MAX] [--max-requests N] [--grace SECONDS]\n", argv0);
+        "       [--max-processes MAX] [--max-requests N] [--grace SECONDS]\n"
+        "       [--preload FILE]...\n", argv0);
 }
-
-/* Exit status 2 means "the configuration is wrong": mod_orx does not       */
-/* restart a host that exits with it, since it would only fail again.       */
-#define EXIT_CONFIG 2
 
 int main(int argc, char **argv)
 {
@@ -614,6 +677,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--max-processes") && i + 1 < argc)   max_procs = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--max-requests") && i + 1 < argc)    max_requests = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--grace") && i + 1 < argc)           grace = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--preload") && i + 1 < argc)         g_preload.push_back(argv[++i]);
         else { usage(argv[0]); return EXIT_CONFIG; }
     }
     if (max_procs < 0) max_procs = min_procs;
@@ -715,11 +779,17 @@ int main(int argc, char **argv)
 
     pid_t master = getpid();
     long idle_since = -1;
-    while (!g_stop) {
+    bool config_error = false;
+    while (!g_stop && !config_error) {
         int st; pid_t dead;
-        while ((dead = waitpid(-1, &st, WNOHANG)) > 0)
+        while ((dead = waitpid(-1, &st, WNOHANG)) > 0) {
             for (int i = 0; i < max_procs; i++)
                 if (g_slots[i].pid == dead) { g_slots[i].pid = 0; slot_set(i, SLOT_EMPTY); }
+            /* A child that cannot start (its preload failed) would fail    */
+            /* again in every replacement: stop, and say why on the way out. */
+            if (WIFEXITED(st) && WEXITSTATUS(st) == EXIT_CONFIG) config_error = true;
+        }
+        if (config_error) break;
 
         int total = 0, ready = 0, idle = 0;
         for (int i = 0; i < max_procs; i++) {
@@ -784,5 +854,5 @@ int main(int argc, char **argv)
     for (int i = 0; i < max_procs; i++) if (g_slots[i].pid > 0) kill(g_slots[i].pid, SIGKILL);
     while (wait(NULL) > 0) ;
     if (path) unlink(path);
-    return 0;
+    return config_error ? EXIT_CONFIG : 0;
 }

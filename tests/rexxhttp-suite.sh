@@ -10,7 +10,8 @@
 # error.log.
 #
 # OOREXX_PROCESSES ("min max") and OOREXX_MAX_REQUESTS override the pool's
-# configuration.
+# configuration. OOREXX_PRELOAD=1 preloads RexxHTTP's four classes
+# (OoRexxPreload) from where the suite deployed them.
 #
 # Requirements: Debian/Ubuntu Apache (a2enmod & co.), ooRexx, mod_orx and
 # oorexx-host installed (make install), a RexxHTTP checkout, run as root.
@@ -46,6 +47,13 @@ OoRexxProcesses ${OOREXX_PROCESSES:-2 8}
 OoRexxMaxRequests ${OOREXX_MAX_REQUESTS:-1000}
 OoRexxTimeout 30
 EOF
+if [ "${OOREXX_PRELOAD:-0}" = 1 ]; then
+    # The processor's directory: the target of the Alias the runner wrote.
+    DIR=$(sed -n 's#^Alias /RexxHTTP/ \(.*\)/$#\1#p' "$CONF")
+    echo "OoRexxPreload $DIR/HTTP.Request.cls $DIR/HTTP.Response.cls" \
+         "$DIR/HTTP.OutputStream.cls $DIR/HTTP.Cookie.cls" \
+         >> /etc/apache2/mods-available/orx.conf
+fi
 a2enmod orx >/dev/null
 a2dismod -f cgid >/dev/null 2>&1 || true
 

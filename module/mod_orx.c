@@ -35,6 +35,7 @@
  *   OoRexxProcesses 2 8                       # min max
  *   OoRexxMaxRequests 1000                    # phases per host process
  *   OoRexxTimeout 60
+ *   OoRexxPreload /path/HTTP.Request.cls ...  # loaded once per host process
  *   <Directory ...>  Options +ExecCGI  AddHandler oorexx-cgi .rex  </Directory>
  *   <Location ...>   AuthType Basic  AuthName x  AuthBasicProvider oorexx
  *                    OoRexxAuthnProgram /path/authn.rex
@@ -94,6 +95,7 @@ static int  g_host_none;            /* OoRexxHost none: started by hand    */
 static int  g_min_procs, g_max_procs, g_max_requests;
 static int  g_max_timeout;          /* the largest OoRexxTimeout anywhere  */
 static const char *g_socket_cfg;    /* OoRexxSocket; NULL = the default    */
+static apr_array_header_t *g_preload; /* OoRexxPreload: absolute paths      */
 
 typedef struct {
     int         timeout;        /* -1 = unset                            */
@@ -197,6 +199,30 @@ static const char *set_max_requests(cmd_parms *cmd, void *dummy, const char *arg
         "OoRexxMaxRequests must be a number of phases (0 = no limit)";
 }
 
+/* OoRexxPreload file...: packages every host process loads once, in an    */
+/* instance it keeps alive, so that the programs that ::Requires them find  */
+/* them already loaded. May be repeated; the files add up.                  */
+static const char *add_preload(cmd_parms *cmd, void *dummy, const char *arg)
+{
+    const char *err = ap_check_cmd_context(cmd, GLOBAL_ONLY);
+    const char *path;
+    (void)dummy;
+    if (err) return err;
+    path = ap_server_root_relative(cmd->pool, arg);
+    if (!path) return apr_pstrcat(cmd->pool, "Invalid OoRexxPreload path: ", arg, NULL);
+    /* A missing file is caught here, when the configuration is read, rather */
+    /* than by every host process failing to start.                          */
+    {
+        apr_finfo_t fi;
+        if (apr_stat(&fi, path, APR_FINFO_TYPE, cmd->temp_pool) != APR_SUCCESS ||
+            fi.filetype != APR_REG)
+            return apr_pstrcat(cmd->pool, "OoRexxPreload: not a file: ", path, NULL);
+    }
+    if (!g_preload) g_preload = apr_array_make(cmd->pool, 4, sizeof(const char *));
+    *(const char **)apr_array_push(g_preload) = path;
+    return NULL;
+}
+
 static const command_rec oorx_cmds[] = {
     AP_INIT_TAKE1("OoRexxSocket", set_socket, NULL, RSRC_CONF,
                   "Path of the Unix socket where oorexx-host listens"),
@@ -208,6 +234,8 @@ static const command_rec oorx_cmds[] = {
                    "Minimum and maximum number of oorexx-host processes"),
     AP_INIT_TAKE1("OoRexxMaxRequests", set_max_requests, NULL, RSRC_CONF,
                   "Phases an oorexx-host process serves before it is replaced (0 = no limit)"),
+    AP_INIT_ITERATE("OoRexxPreload", add_preload, NULL, RSRC_CONF,
+                    "Rexx packages every oorexx-host process loads once, at start"),
     AP_INIT_TAKE1("OoRexxAuthnProgram", set_program, (void *)1, RSRC_CONF | ACCESS_CONF,
                   "The Rexx program behind \"AuthBasicProvider oorexx\""),
     AP_INIT_TAKE1("OoRexxLogHook", set_log_hook, NULL, RSRC_CONF | ACCESS_CONF,
@@ -411,6 +439,7 @@ static int oorx_pre_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptem
     g_max_timeout = DEFAULT_TIMEOUT;
     g_socket_cfg = NULL;
     g_socket_path = NULL;
+    g_preload = NULL;
     return OK;
 }
 
@@ -445,16 +474,23 @@ static int oorx_post_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *pte
     }
     if ((g->lfd = bind_socket(s, g->path)) < 0) return HTTP_INTERNAL_SERVER_ERROR;
 
-    argv = apr_pcalloc(pp, 14 * sizeof *argv);
-    argv[0]  = (char *)g->host;
-    argv[1]  = "--listen-fd";     argv[2]  = "3";
-    argv[3]  = "--processes";     argv[4]  = apr_itoa(pp, g_min_procs);
-    argv[5]  = "--max-processes"; argv[6]  = apr_itoa(pp, g_max_procs);
-    argv[7]  = "--max-requests";  argv[8]  = apr_itoa(pp, g_max_requests);
-    /* A drained host gets as long as the longest phase may last, and a   */
-    /* margin, before what is left is killed.                              */
-    argv[9]  = "--grace";         argv[10] = apr_itoa(pp, g_max_timeout + 10);
-    argv[11] = NULL;
+    {
+        int i, n = g_preload ? g_preload->nelts : 0, a = 11;
+        argv = apr_pcalloc(pp, (12 + 2 * n) * sizeof *argv);
+        argv[0]  = (char *)g->host;
+        argv[1]  = "--listen-fd";     argv[2]  = "3";
+        argv[3]  = "--processes";     argv[4]  = apr_itoa(pp, g_min_procs);
+        argv[5]  = "--max-processes"; argv[6]  = apr_itoa(pp, g_max_procs);
+        argv[7]  = "--max-requests";  argv[8]  = apr_itoa(pp, g_max_requests);
+        /* A drained host gets as long as the longest phase may last, and a */
+        /* margin, before what is left is killed.                            */
+        argv[9]  = "--grace";         argv[10] = apr_itoa(pp, g_max_timeout + 10);
+        for (i = 0; i < n; i++) {
+            argv[a++] = "--preload";
+            argv[a++] = apr_pstrdup(pp, APR_ARRAY_IDX(g_preload, i, const char *));
+        }
+        argv[a] = NULL;
+    }
     g->argv = argv;
 
     apr_pool_cleanup_register(pconf, g, end_generation, apr_pool_cleanup_null);
