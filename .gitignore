@@ -1,0 +1,6 @@
+build/
+module/.libs/
+module/*.lo
+module/*.la
+module/*.slo
+module/*.o
