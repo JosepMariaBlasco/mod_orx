@@ -6,8 +6,11 @@
  *
  * Process model (see the design notes in README.md):
  *
- *   - A master process binds one Unix socket and forks a pool of children.
- *     The master never touches ooRexx: it only keeps the pool alive.
+ *   - A master process forks a pool of children on one Unix socket, and
+ *     grows and shrinks it between a minimum and a maximum. The master
+ *     never touches ooRexx: it only keeps the pool alive. Normally
+ *     mod_oorexx starts the master, with a socket it has already bound
+ *     (--listen-fd); for debugging it can be started by hand (--socket).
  *   - Every child accepts on the SAME socket; the kernel hands each
  *     connection to an idle child. A child serves one connection at a time.
  *   - One connection = one phase of one request. For each one the child
@@ -22,8 +25,13 @@
  *     passes. It only ever uses the INSTANCE API: using a thread context
  *     from a thread other than its own aborts the process (measured).
  *
+ *   - SIGTERM drains: no child accepts anything new, the children finish
+ *     what they hold and what is queued, and the master exits; after
+ *     --grace seconds whatever is left is killed.
+ *
  * Usage:
- *   oorexx-host --socket PATH [--processes N] [--max-requests N]
+ *   oorexx-host (--socket PATH | --listen-fd N) [--processes MIN]
+ *               [--max-processes MAX] [--max-requests N] [--grace SECONDS]
  */
 
 #include <oorexxapi.h>
@@ -42,6 +50,8 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <poll.h>
+#include <fcntl.h>
+#include <sys/mman.h>
 #ifdef __linux__
 #include <sys/prctl.h>
 #endif
@@ -423,17 +433,52 @@ static void serve(int fd)
 
 /* ------------------------------------------------------------------------ */
 /* Pool                                                                     */
+/*                                                                          */
+/* The master forks children and keeps between --processes and             */
+/* --max-processes of them alive. It never touches ooRexx. Every child has */
+/* a slot in a shared page with its state; the master reads the states to   */
+/* decide when to grow (no child idle) or shrink (idle ones to spare for a  */
+/* while). A child moves IDLE -> BUSY itself before accepting; the master   */
+/* moves IDLE -> RETIRE to ask an idle child to leave. Both moves are       */
+/* compare-and-swap, so a child never accepts after being retired.          */
+/*                                                                          */
+/* Draining (SIGTERM): the master closes the write end of a pipe that every */
+/* child polls. A child that sees it accepts what is still queued on the    */
+/* socket, serves it, and exits. When the module manages the host, it has   */
+/* unlinked the socket's path before signalling, so nothing new arrives on  */
+/* this socket; the next generation of hosts listens on a new one. After   */
+/* --grace seconds the master SIGKILLs what is left.                        */
 /* ------------------------------------------------------------------------ */
 
-static volatile sig_atomic_t g_stop = 0;
-static void on_term(int) { g_stop = 1; }
+enum { SLOT_EMPTY = 0, SLOT_STARTING, SLOT_IDLE, SLOT_BUSY, SLOT_RETIRE };
 
-static void child_main(int lsock, int max_requests)
+struct slot { int state; pid_t pid; };
+
+static struct slot *g_slots;        /* shared page, one per child           */
+
+static bool slot_cas(int i, int from, int to)
+{
+    return __atomic_compare_exchange_n(&g_slots[i].state, &from, to, false,
+                                       __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+}
+
+static void slot_set(int i, int v) { __atomic_store_n(&g_slots[i].state, v, __ATOMIC_SEQ_CST); }
+static int  slot_get(int i)        { return __atomic_load_n(&g_slots[i].state, __ATOMIC_SEQ_CST); }
+
+/* How often an idle child looks at its slot, and how long the pool must    */
+/* have idle children to spare before the master retires one.              */
+#define CHILD_POLL_MS    500
+#define MASTER_TICK_MS   200
+#define SHRINK_AFTER_MS  10000
+
+static void child_main(int me, pid_t master, int lsock, int stopfd, int max_requests)
 {
 #ifdef __linux__
     prctl(PR_SET_PDEATHSIG, SIGKILL);  /* never outlive the master */
+    if (getppid() != master) _exit(0);
 #endif
     signal(SIGTERM, SIG_DFL);
+    signal(SIGCHLD, SIG_DFL);
     signal(SIGPIPE, SIG_IGN);
     pthread_t t;
     pthread_create(&t, NULL, watchdog, NULL);
@@ -441,65 +486,251 @@ static void child_main(int lsock, int max_requests)
     /* Pre-warm: the first instance of a process is the expensive one.      */
     RexxInstance *inst; RexxThreadContext *tc;
     if (RexxCreateInterpreter(&inst, &tc, NULL)) inst->Terminate();
+    if (!slot_cas(me, SLOT_STARTING, SLOT_IDLE)) _exit(0);
 
-    for (int served = 0; max_requests <= 0 || served < max_requests; served++) {
+    bool draining = false;
+    for (int served = 0; max_requests <= 0 || served < max_requests; ) {
+        struct pollfd pf[2] = { { lsock, POLLIN, 0 }, { stopfd, POLLIN, 0 } };
+        int n = poll(pf, 2, draining ? 0 : CHILD_POLL_MS);
+        if (n < 0) { if (errno == EINTR) continue; _exit(1); }
+        if (pf[1].revents) draining = true;
+        if (n == 0 && !draining) {
+            if (slot_get(me) == SLOT_RETIRE) _exit(0);
+            continue;
+        }
+        if (!slot_cas(me, SLOT_IDLE, SLOT_BUSY)) _exit(0);   /* retired */
         int fd = accept(lsock, NULL, NULL);
-        if (fd < 0) { if (errno == EINTR) { served--; continue; } _exit(1); }
+        if (fd < 0) {
+            slot_set(me, SLOT_IDLE);
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR ||
+                errno == ECONNABORTED) {
+                if (draining) _exit(0);   /* the queue is empty: done      */
+                continue;                 /* another child took it          */
+            }
+            _exit(1);
+        }
+        /* The listening socket is non-blocking (so that idle children can  */
+        /* race for a connection); the connection itself must block. Linux  */
+        /* does not pass O_NONBLOCK on to accepted sockets, macOS does.     */
+        fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
         serve(fd);
         close(fd);
+        served++;
+        if (!slot_cas(me, SLOT_BUSY, SLOT_IDLE)) _exit(0);
     }
     _exit(0);
 }
 
+/* Signals reach the master's loop through a self-pipe.                     */
+static int g_wake[2] = { -1, -1 };
+static volatile sig_atomic_t g_stop = 0;
+static void on_signal(int sig)
+{
+    int e = errno;
+    if (sig == SIGTERM || sig == SIGINT) g_stop = 1;
+    if (write(g_wake[1], "x", 1) < 0) { /* the pipe is full: fine */ }
+    errno = e;
+}
+
+static long now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
+}
+
+static void usage(const char *argv0)
+{
+    fprintf(stderr,
+        "usage: %s (--socket PATH | --listen-fd N) [--processes MIN]\n"
+        "       [--max-processes MAX] [--max-requests N] [--grace SECONDS]\n", argv0);
+}
+
+/* Exit status 2 means "the configuration is wrong": mod_oorexx does not    */
+/* restart a host that exits with it, since it would only fail again.       */
+#define EXIT_CONFIG 2
+
 int main(int argc, char **argv)
 {
     const char *path = NULL;
-    int processes = 4, max_requests = 1000;
+    int listen_fd = -1;
+    int min_procs = 4, max_procs = -1, max_requests = 1000, grace = 70;
     for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "--socket") && i + 1 < argc)            path = argv[++i];
-        else if (!strcmp(argv[i], "--processes") && i + 1 < argc)    processes = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--max-requests") && i + 1 < argc) max_requests = atoi(argv[++i]);
-        else { fprintf(stderr, "usage: %s --socket PATH [--processes N] [--max-requests N]\n", argv[0]); return 2; }
+        if (!strcmp(argv[i], "--socket") && i + 1 < argc)               path = argv[++i];
+        else if (!strcmp(argv[i], "--listen-fd") && i + 1 < argc)       listen_fd = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--processes") && i + 1 < argc)       min_procs = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--max-processes") && i + 1 < argc)   max_procs = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--max-requests") && i + 1 < argc)    max_requests = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--grace") && i + 1 < argc)           grace = atoi(argv[++i]);
+        else { usage(argv[0]); return EXIT_CONFIG; }
     }
-    if (!path || processes < 1) { fprintf(stderr, "oorexx-host: --socket is required\n"); return 2; }
-
-    int lsock = socket(AF_UNIX, SOCK_STREAM, 0);
-    struct sockaddr_un sa; memset(&sa, 0, sizeof sa);
-    sa.sun_family = AF_UNIX;
-    if (strlen(path) >= sizeof sa.sun_path) { fprintf(stderr, "oorexx-host: socket path too long\n"); return 1; }
-    strcpy(sa.sun_path, path);
-    unlink(path);
-    if (bind(lsock, (struct sockaddr *)&sa, sizeof sa) < 0 || listen(lsock, 128) < 0) {
-        perror("oorexx-host: bind/listen"); return 1;
+    if (max_procs < 0) max_procs = min_procs;
+    if ((path == NULL) == (listen_fd < 0) || min_procs < 1 || max_procs < min_procs
+        || grace < 0) {
+        usage(argv[0]);
+        return EXIT_CONFIG;
     }
-    /* Only the user the host runs as (Apache's) may connect.               */
-    chmod(path, 0600);
 
-    /* No SA_RESTART: a signal must interrupt wait() so the loop sees it.   */
-    struct sigaction sa_term;
-    memset(&sa_term, 0, sizeof sa_term);
-    sa_term.sa_handler = on_term;
-    sigaction(SIGTERM, &sa_term, NULL);
-    sigaction(SIGINT, &sa_term, NULL);
-    std::vector<pid_t> kids(processes, 0);
-    while (!g_stop) {
-        for (int i = 0; i < processes; i++) {
-            if (kids[i] == 0) {
-                pid_t p = fork();
-                if (p == 0) child_main(lsock, max_requests);
-                kids[i] = p > 0 ? p : 0;
-            }
+    int lsock = listen_fd;
+    if (path) {
+        /* Standalone: bind the socket ourselves (only the user the host    */
+        /* runs as, Apache's, may connect).                                 */
+        lsock = socket(AF_UNIX, SOCK_STREAM, 0);
+        struct sockaddr_un sa; memset(&sa, 0, sizeof sa);
+        sa.sun_family = AF_UNIX;
+        if (strlen(path) >= sizeof sa.sun_path) {
+            fprintf(stderr, "oorexx-host: socket path too long\n"); return EXIT_CONFIG;
         }
-        int st;
-        pid_t dead = wait(&st);
-        if (dead > 0)
-            for (int i = 0; i < processes; i++) if (kids[i] == dead) kids[i] = 0;
+        strcpy(sa.sun_path, path);
+        unlink(path);
+        if (bind(lsock, (struct sockaddr *)&sa, sizeof sa) < 0 || listen(lsock, 128) < 0) {
+            perror("oorexx-host: bind/listen"); return EXIT_CONFIG;
+        }
+        chmod(path, 0600);
+    } else {
+        /* Managed by mod_oorexx: the module created, bound and secured the */
+        /* socket (as root, in Apache's run-time directory) and owns its    */
+        /* path; we only accept on it.                                      */
+        int type = 0; socklen_t tl = sizeof type;
+        if (getsockopt(lsock, SOL_SOCKET, SO_TYPE, &type, &tl) < 0 || type != SOCK_STREAM) {
+            fprintf(stderr, "oorexx-host: --listen-fd %d is not a stream socket\n", lsock);
+            return EXIT_CONFIG;
+        }
+    }
+    fcntl(lsock, F_SETFL, fcntl(lsock, F_GETFL) | O_NONBLOCK);
+
+    if (listen_fd >= 0) {
+        /* Managed: split into a KEEPER, Apache's only child, and the      */
+        /* MASTER of the pool, the keeper's child. On SIGTERM the keeper   */
+        /* passes it on and exits at once, so Apache reaps it right away;  */
+        /* the master, orphaned, drains on its own. Apache unloads and     */
+        /* reloads its modules on every restart, so nothing of a draining */
+        /* host may need the module afterwards: not even being reaped.    */
+        /* If the master dies on its own, the keeper exits with its status */
+        /* and the module starts a new host.                               */
+        /* The keeper takes its signals synchronously (sigwaitinfo), so   */
+        /* they are blocked from before the fork: none can be lost.        */
+        sigset_t ks, old;
+        sigemptyset(&ks);
+        sigaddset(&ks, SIGTERM); sigaddset(&ks, SIGINT); sigaddset(&ks, SIGCHLD);
+        sigprocmask(SIG_BLOCK, &ks, &old);
+        pid_t m = fork();
+        if (m < 0) { perror("oorexx-host: fork"); return 1; }
+        if (m > 0) {
+            signal(SIGHUP,  SIG_IGN);
+            signal(SIGUSR1, SIG_IGN);
+            signal(SIGUSR2, SIG_IGN);
+            close(lsock);
+            int st;
+            for (;;) {
+                if (waitpid(m, &st, WNOHANG) == m) break;
+                int sig = sigwaitinfo(&ks, NULL);
+                if (sig == SIGTERM || sig == SIGINT) { kill(m, SIGTERM); _exit(0); }
+            }
+            /* Never 15 or 7 (Apache's APEXIT_CHILDFATAL and CHILDSICK).    */
+            _exit(WIFEXITED(st) && WEXITSTATUS(st) == EXIT_CONFIG ? EXIT_CONFIG : 1);
+        }
+        sigprocmask(SIG_SETMASK, &old, NULL);
+#ifdef __linux__
+        prctl(PR_SET_PDEATHSIG, SIGTERM);       /* the keeper died: drain */
+#endif
+    }
+
+    void *page = mmap(NULL, sizeof(struct slot) * max_procs, PROT_READ | PROT_WRITE,
+                      MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (page == MAP_FAILED) { perror("oorexx-host: mmap"); return 1; }
+    g_slots = (struct slot *)page;
+    memset(g_slots, 0, sizeof(struct slot) * max_procs);
+
+    int stop[2];
+    if (pipe(stop) < 0 || pipe(g_wake) < 0) { perror("oorexx-host: pipe"); return 1; }
+    fcntl(g_wake[0], F_SETFL, O_NONBLOCK);
+    fcntl(g_wake[1], F_SETFL, O_NONBLOCK);
+
+    /* No SA_RESTART: a signal must interrupt poll() so the loop sees it.   */
+    struct sigaction sa_sig;
+    memset(&sa_sig, 0, sizeof sa_sig);
+    sa_sig.sa_handler = on_signal;
+    sigaction(SIGTERM, &sa_sig, NULL);
+    sigaction(SIGINT,  &sa_sig, NULL);
+    sigaction(SIGCHLD, &sa_sig, NULL);
+    /* When prefork Apache stops, it signals its whole process group; a   */
+    /* managed host has its own group, and ignores these anyway.            */
+    signal(SIGHUP,  SIG_IGN);
+    signal(SIGUSR1, SIG_IGN);
+    signal(SIGUSR2, SIG_IGN);
+    signal(SIGPIPE, SIG_IGN);
+
+    pid_t master = getpid();
+    long idle_since = -1;
+    while (!g_stop) {
+        int st; pid_t dead;
+        while ((dead = waitpid(-1, &st, WNOHANG)) > 0)
+            for (int i = 0; i < max_procs; i++)
+                if (g_slots[i].pid == dead) { g_slots[i].pid = 0; slot_set(i, SLOT_EMPTY); }
+
+        int total = 0, ready = 0, idle = 0;
+        for (int i = 0; i < max_procs; i++) {
+            int s = slot_get(i);
+            if (s == SLOT_EMPTY) continue;
+            total++;
+            if (s == SLOT_IDLE) idle++;
+            if (s == SLOT_IDLE || s == SLOT_STARTING) ready++;
+        }
+
+        int want = 0;
+        if (total < min_procs) want = min_procs - total;
+        else if (ready == 0 && total < max_procs) want = 1;
+        for (int i = 0; i < max_procs && want > 0; i++) {
+            if (slot_get(i) != SLOT_EMPTY) continue;
+            slot_set(i, SLOT_STARTING);
+            pid_t p = fork();
+            if (p == 0) {
+                close(stop[1]); close(g_wake[0]); close(g_wake[1]);
+                child_main(i, master, lsock, stop[0], max_requests);
+            }
+            if (p < 0) { slot_set(i, SLOT_EMPTY); break; }
+            g_slots[i].pid = p;
+            want--;
+        }
+
+        /* Shrink: more than one child idle, and above the minimum, for     */
+        /* SHRINK_AFTER_MS on end: retire one idle child, then wait again.  */
+        if (idle > 1 && total > min_procs) {
+            if (idle_since < 0) idle_since = now_ms();
+            else if (now_ms() - idle_since >= SHRINK_AFTER_MS) {
+                for (int i = 0; i < max_procs; i++)
+                    if (slot_cas(i, SLOT_IDLE, SLOT_RETIRE)) break;
+                idle_since = -1;
+            }
+        } else idle_since = -1;
+
+        struct pollfd pf = { g_wake[0], POLLIN, 0 };
+        poll(&pf, 1, MASTER_TICK_MS);
+        char junk[64];
+        while (read(g_wake[0], junk, sizeof junk) > 0) ;
+    }
+
+    /* Drain: tell the children, give them --grace seconds, then kill.      */
+    close(stop[1]);
+    long deadline = now_ms() + grace * 1000L;
+    for (;;) {
+        int left = 0;
+        int st; pid_t dead;
+        while ((dead = waitpid(-1, &st, WNOHANG)) > 0)
+            for (int i = 0; i < max_procs; i++)
+                if (g_slots[i].pid == dead) { g_slots[i].pid = 0; slot_set(i, SLOT_EMPTY); }
+        for (int i = 0; i < max_procs; i++) if (g_slots[i].pid > 0) left++;
+        if (left == 0 || now_ms() >= deadline) break;
+        struct pollfd pf = { g_wake[0], POLLIN, 0 };
+        poll(&pf, 1, MASTER_TICK_MS);
+        char junk[64];
+        while (read(g_wake[0], junk, sizeof junk) > 0) ;
     }
     /* SIGKILL, not SIGTERM: ooRexx installs its own handlers in every
-     * process that creates an instance, and turns SIGTERM into a HALT.
-     * The children hold no state worth a graceful exit.                    */
-    for (int i = 0; i < processes; i++) if (kids[i] > 0) kill(kids[i], SIGKILL);
+     * process that creates an instance, and turns SIGTERM into a HALT.     */
+    for (int i = 0; i < max_procs; i++) if (g_slots[i].pid > 0) kill(g_slots[i].pid, SIGKILL);
     while (wait(NULL) > 0) ;
-    unlink(path);
+    if (path) unlink(path);
     return 0;
 }

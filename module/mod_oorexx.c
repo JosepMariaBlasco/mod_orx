@@ -5,14 +5,22 @@
  * Copyright 2026 Josep Maria Blasco
  * Licensed under the Apache License, Version 2.0 (see LICENSE).
  *
- * Milestone 0: the content handler "oorexx-cgi", which runs a Rexx CGI
- * program with the semantics of mod_cgi (same checks, same environment,
- * same header parsing, same Location handling), but in an oorexx-host
- * process instead of a fork+exec per request. The host is started outside
- * Apache for now; managing it from here comes next.
+ * What there is so far:
+ *
+ *   - The content handler "oorexx-cgi", which runs a Rexx CGI program with
+ *     the semantics of mod_cgi (same checks, same environment, same header
+ *     parsing, same Location handling), but in an oorexx-host process
+ *     instead of a fork+exec per request.
+ *   - The host's life cycle, in the manner of mod_cgid's daemon: the module
+ *     binds the socket (as root, in Apache's run-time directory, owned by
+ *     Apache's User), starts oorexx-host on it in post_config, restarts it
+ *     if it dies, and drains it on every restart and stop of Apache, so that
+ *     requests in flight finish while the new generation already serves.
  *
  *   LoadModule oorexx_module modules/mod_oorexx.so
- *   OoRexxSocket /run/oorexx/host.sock
+ *   OoRexxHost /usr/local/bin/oorexx-host     # or "none": started by hand
+ *   OoRexxProcesses 2 8                       # min max
+ *   OoRexxMaxRequests 1000                    # phases per host process
  *   OoRexxTimeout 60
  *   <Directory ...>  Options +ExecCGI  AddHandler oorexx-cgi .rex  </Directory>
  */
@@ -24,38 +32,51 @@
 #include "http_protocol.h"
 #include "http_request.h"
 #include "util_script.h"
+#include "unixd.h"
+#include "mod_unixd.h"
 #include "apr_strings.h"
+#include "apr_thread_proc.h"
 
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/time.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 #include "../include/oorexx_protocol.h"
+#include "../build/config.h"   /* OORX_DEFAULT_HOST, written by make */
 
 module AP_MODULE_DECLARE_DATA oorexx_module;
 
 #define DEFAULT_TIMEOUT 60
+#define DEFAULT_SOCKET        "oorexx.sock"   /* in DefaultRuntimeDir */
+#define DEFAULT_MIN_PROCESSES 2
+#define DEFAULT_MAX_PROCESSES 8
+#define DEFAULT_MAX_REQUESTS  1000
+#define HOST_EXIT_CONFIG      2     /* oorexx-host: "my configuration is wrong" */
+#define CONNECT_FIRST_DELAY   apr_time_from_msec(10)
+#define CONNECT_MAX_DELAY     apr_time_from_msec(500)
+#define CONNECT_BUDGET        apr_time_from_sec(5)
 
 /* ------------------------------------------------------------------------ */
 /* Configuration                                                            */
+/*                                                                          */
+/* The pool directives are global (one pool per Apache), and so they live  */
+/* in plain statics, reset in pre_config on every (re)read of the config.  */
 /* ------------------------------------------------------------------------ */
 
-typedef struct { const char *socket; } oorx_server_cfg;
+static const char *g_host;          /* OoRexxHost; NULL = the default     */
+static int  g_host_none;            /* OoRexxHost none: started by hand    */
+static int  g_min_procs, g_max_procs, g_max_requests;
+static int  g_max_timeout;          /* the largest OoRexxTimeout anywhere  */
+static const char *g_socket_cfg;    /* OoRexxSocket; NULL = the default    */
+
 typedef struct { int timeout; } oorx_dir_cfg;   /* -1 = unset */
-
-static void *create_server_cfg(apr_pool_t *p, server_rec *s)
-{
-    oorx_server_cfg *c = apr_pcalloc(p, sizeof *c);
-    (void)s;
-    return c;
-}
-
-static void *merge_server_cfg(apr_pool_t *p, void *basev, void *addv)
-{
-    oorx_server_cfg *base = basev, *add = addv, *c = apr_pcalloc(p, sizeof *c);
-    c->socket = add->socket ? add->socket : base->socket;
-    return c;
-}
 
 static void *create_dir_cfg(apr_pool_t *p, char *dir)
 {
@@ -74,11 +95,11 @@ static void *merge_dir_cfg(apr_pool_t *p, void *basev, void *addv)
 
 static const char *set_socket(cmd_parms *cmd, void *dummy, const char *arg)
 {
-    oorx_server_cfg *c = ap_get_module_config(cmd->server->module_config,
-                                              &oorexx_module);
+    const char *err = ap_check_cmd_context(cmd, GLOBAL_ONLY);
     (void)dummy;
-    c->socket = ap_server_root_relative(cmd->pool, arg);
-    return c->socket ? NULL : "Invalid OoRexxSocket path";
+    if (err) return err;
+    g_socket_cfg = ap_server_root_relative(cmd->pool, arg);
+    return g_socket_cfg ? NULL : "Invalid OoRexxSocket path";
 }
 
 static const char *set_timeout(cmd_parms *cmd, void *dcfg, const char *arg)
@@ -86,7 +107,51 @@ static const char *set_timeout(cmd_parms *cmd, void *dcfg, const char *arg)
     oorx_dir_cfg *c = dcfg;
     (void)cmd;
     c->timeout = atoi(arg);
-    return c->timeout > 0 ? NULL : "OoRexxTimeout must be a positive number of seconds";
+    if (c->timeout <= 0) return "OoRexxTimeout must be a positive number of seconds";
+    if (c->timeout > g_max_timeout) g_max_timeout = c->timeout;
+    return NULL;
+}
+
+static int parse_count(const char *arg, int min)
+{
+    char *end;
+    long v = strtol(arg, &end, 10);
+    return (*arg && !*end && v >= min && v <= 100000) ? (int)v : -1;
+}
+
+static const char *set_host(cmd_parms *cmd, void *dummy, const char *arg)
+{
+    const char *err = ap_check_cmd_context(cmd, GLOBAL_ONLY);
+    (void)dummy;
+    if (err) return err;
+    if (!strcasecmp(arg, "none")) { g_host_none = 1; g_host = NULL; return NULL; }
+    g_host_none = 0;
+    g_host = ap_server_root_relative(cmd->pool, arg);
+    return g_host ? NULL : "Invalid OoRexxHost path";
+}
+
+static const char *set_processes(cmd_parms *cmd, void *dummy, const char *a1, const char *a2)
+{
+    const char *err = ap_check_cmd_context(cmd, GLOBAL_ONLY);
+    (void)dummy;
+    if (err) return err;
+    g_min_procs = parse_count(a1, 1);
+    g_max_procs = a2 ? parse_count(a2, 1) : g_min_procs;
+    if (g_min_procs < 0 || g_max_procs < 0)
+        return "OoRexxProcesses takes one or two positive numbers: min [max]";
+    if (g_max_procs < g_min_procs)
+        return "OoRexxProcesses: max must not be lower than min";
+    return NULL;
+}
+
+static const char *set_max_requests(cmd_parms *cmd, void *dummy, const char *arg)
+{
+    const char *err = ap_check_cmd_context(cmd, GLOBAL_ONLY);
+    (void)dummy;
+    if (err) return err;
+    g_max_requests = parse_count(arg, 0);
+    return g_max_requests >= 0 ? NULL :
+        "OoRexxMaxRequests must be a number of phases (0 = no limit)";
 }
 
 static const command_rec oorx_cmds[] = {
@@ -94,8 +159,268 @@ static const command_rec oorx_cmds[] = {
                   "Path of the Unix socket where oorexx-host listens"),
     AP_INIT_TAKE1("OoRexxTimeout", set_timeout, NULL, RSRC_CONF | ACCESS_CONF,
                   "Seconds a phase may run before the host halts it"),
+    AP_INIT_TAKE1("OoRexxHost", set_host, NULL, RSRC_CONF,
+                  "The oorexx-host executable, or \"none\" if it is started by hand"),
+    AP_INIT_TAKE12("OoRexxProcesses", set_processes, NULL, RSRC_CONF,
+                   "Minimum and maximum number of oorexx-host processes"),
+    AP_INIT_TAKE1("OoRexxMaxRequests", set_max_requests, NULL, RSRC_CONF,
+                  "Phases an oorexx-host process serves before it is replaced (0 = no limit)"),
     {NULL}
 };
+
+/* ------------------------------------------------------------------------ */
+/* The host's life cycle                                                    */
+/*                                                                          */
+/* One "generation" per reading of the configuration. Its socket is bound   */
+/* here, in the parent, as root; the parent keeps the listening descriptor  */
+/* for the whole generation, so connections queue on it even while a dead   */
+/* host is being replaced, and passes it to the host as descriptor 3.       */
+/*                                                                          */
+/* When the configuration is reread (any restart) or Apache stops, pconf is */
+/* cleared: the generation's cleanup unlinks the socket's path FIRST (so no */
+/* new connection can reach this generation) and then SIGTERMs the host,    */
+/* which drains -- finishes what it holds and what is queued -- and exits.  */
+/* The new generation starts right away on a new socket at the same path,   */
+/* and the requests of old workers keep their connections to the old one.   */
+/*                                                                          */
+/* Everything of a generation lives in pconf and ends with it, because      */
+/* Apache unloads and reloads this module on every restart: a callback left */
+/* registered past pconf would be called, when the old host died, in code   */
+/* that is no longer there (measured: Apache's parent segfaults after the   */
+/* module is upgraded). So the child Apache has is the host's KEEPER, which */
+/* on SIGTERM hands the signal to the host's master and exits at once; the  */
+/* cleanup reaps it there and then, and the master drains as an orphan.     */
+/* ------------------------------------------------------------------------ */
+
+typedef struct {
+    apr_proc_t  proc;          /* the host's keeper                          */
+    int         running;       /* proc is alive and registered               */
+    int         retired;       /* the generation is over: do not restart     */
+    int         lfd;           /* the listening socket (-1 once closed)      */
+    const char *path;          /* its path                                   */
+    const char *host;
+    char      **argv;
+    server_rec *s;
+    apr_pool_t *pool;          /* a subpool of pconf: the registrations      */
+    pid_t       parent;        /* Apache's parent process                    */
+} oorx_gen;
+
+static const char *g_socket_path;   /* what the handler connects to         */
+static oorx_gen   *g_gen;           /* the current generation (parent only) */
+
+static void host_maint(int reason, void *data, apr_wait_t status);
+
+static int start_host(oorx_gen *g)
+{
+    pid_t pid = fork();
+    if (pid < 0) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, errno, g->s, "mod_oorexx: cannot fork oorexx-host");
+        return -1;
+    }
+    if (pid == 0) {
+        int fd, sig;
+        sigset_t none;
+        /* Its own process group: when prefork Apache stops, it signals   */
+        /* its whole group, and that must not reach the host (measured).   */
+        setpgid(0, 0);
+        if (ap_unixd_setup_child()) _exit(HOST_EXIT_CONFIG);
+#ifdef __linux__
+        /* After the change of user, which clears it. The host drains if  */
+        /* Apache's parent dies without telling it.                        */
+        prctl(PR_SET_PDEATHSIG, SIGTERM);
+        if (getppid() != g->parent) _exit(0);
+#endif
+        /* What exec keeps and the host should not: Apache's signal mask   */
+        /* and ignored signals, and every descriptor but the socket.       */
+        sigemptyset(&none);
+        sigprocmask(SIG_SETMASK, &none, NULL);
+        for (sig = 1; sig < NSIG; sig++) signal(sig, SIG_DFL);
+        if (dup2(g->lfd, 3) < 0) _exit(HOST_EXIT_CONFIG);
+        fd = open("/dev/null", O_RDWR);
+        if (fd >= 0) { dup2(fd, 0); dup2(fd, 1); }   /* stderr: the error log */
+        {
+            long maxfd = sysconf(_SC_OPEN_MAX);
+            if (maxfd < 0 || maxfd > 65536) maxfd = 65536;
+            for (fd = 4; fd < maxfd; fd++) close(fd);
+        }
+        execv(g->host, g->argv);
+        _exit(127);
+    }
+    memset(&g->proc, 0, sizeof g->proc);
+    g->proc.pid = pid;
+    g->running = 1;
+    apr_proc_other_child_register(&g->proc, host_maint, g, NULL, g->pool);
+    ap_log_error(APLOG_MARK, APLOG_INFO, 0, g->s,
+                 "mod_oorexx: oorexx-host started (pid %ld) on %s", (long)pid, g->path);
+    return 0;
+}
+
+/* APR hands the maintenance callback the child's exit CODE (or the number  */
+/* of the signal that killed it), not a raw wait() status: mod_cgid, too,   */
+/* compares it directly.                                                    */
+static void host_maint(int reason, void *data, apr_wait_t status)
+{
+    oorx_gen *g = data;
+    switch (reason) {
+    case APR_OC_REASON_DEATH:
+    case APR_OC_REASON_LOST:
+        apr_proc_other_child_unregister(g);
+        g->running = 0;
+        if (g->retired) break;              /* a drained host: all is well */
+        if (reason == APR_OC_REASON_DEATH &&
+            (status == HOST_EXIT_CONFIG || status == 127)) {
+            ap_log_error(APLOG_MARK, APLOG_CRIT, 0, g->s,
+                         "mod_oorexx: oorexx-host (%s) could not start (status %d); "
+                         "not restarting it", g->host, (int)status);
+            break;
+        }
+        ap_log_error(APLOG_MARK, APLOG_ERR, 0, g->s,
+                     "mod_oorexx: oorexx-host (pid %ld) %s (status %d); restarting it",
+                     (long)g->proc.pid,
+                     reason == APR_OC_REASON_LOST ? "was lost" : "ended", (int)status);
+        start_host(g);
+        break;
+    default:            /* RESTART, RUNNING, UNWRITABLE, UNREGISTER: nothing */
+        break;
+    }
+}
+
+static apr_status_t end_generation(void *data)
+{
+    oorx_gen *g = data;
+    if (getpid() != g->parent) return APR_SUCCESS;   /* never in a worker */
+    g->retired = 1;
+    if (g->lfd >= 0) {
+        unlink(g->path);              /* first: nothing new reaches it     */
+        close(g->lfd);
+        g->lfd = -1;
+    }
+    if (g->running) {
+        /* The keeper exits as soon as it has passed SIGTERM on (a few    */
+        /* milliseconds, measured); a second of patience, then SIGKILL -- */
+        /* the master drains anyway when its keeper dies.                  */
+        /* The keeper's registration is gone already: it lives in a       */
+        /* subpool, and APR destroys the subpools of pconf before it runs */
+        /* pconf's own cleanups. (Unregistering it here again would crash */
+        /* inside APR: measured.)                                          */
+        int i, st;
+        kill(g->proc.pid, SIGTERM);
+        for (i = 0; i < 100; i++) {
+            pid_t r = waitpid(g->proc.pid, &st, WNOHANG);
+            if (r == g->proc.pid || (r < 0 && errno == ECHILD)) break;
+            apr_sleep(apr_time_from_msec(10));
+        }
+        if (i == 100) { kill(g->proc.pid, SIGKILL); waitpid(g->proc.pid, &st, 0); }
+        g->running = 0;
+    }
+    if (g_gen == g) g_gen = NULL;
+    return APR_SUCCESS;
+}
+
+static int bind_socket(server_rec *s, const char *path)
+{
+    struct sockaddr_un sa;
+    int fd;
+    if (strlen(path) >= sizeof sa.sun_path) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, 0, s, "mod_oorexx: socket path too long: %s", path);
+        return -1;
+    }
+    memset(&sa, 0, sizeof sa);
+    sa.sun_family = AF_UNIX;
+    strcpy(sa.sun_path, path);
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, errno, s, "mod_oorexx: cannot create a socket");
+        return -1;
+    }
+    /* Workers fork without exec and close it in child_init; anything     */
+    /* else Apache starts with exec must not inherit it.                   */
+    fcntl(fd, F_SETFD, FD_CLOEXEC);
+    unlink(path);
+    if (bind(fd, (struct sockaddr *)&sa, sizeof sa) < 0) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, errno, s, "mod_oorexx: cannot bind %s", path);
+        close(fd);
+        return -1;
+    }
+    /* Only Apache's User may connect, as with mod_cgid's ScriptSock.      */
+    if (chmod(path, 0600) < 0 ||
+        (geteuid() == 0 && chown(path, ap_unixd_config.user_id, ap_unixd_config.group_id) < 0) ||
+        listen(fd, 1024) < 0) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, errno, s, "mod_oorexx: cannot set up %s", path);
+        close(fd);
+        unlink(path);
+        return -1;
+    }
+    return fd;
+}
+
+static int oorx_pre_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptemp)
+{
+    (void)pconf; (void)plog; (void)ptemp;
+    g_host = NULL; g_host_none = 0;
+    g_min_procs = DEFAULT_MIN_PROCESSES;
+    g_max_procs = DEFAULT_MAX_PROCESSES;
+    g_max_requests = DEFAULT_MAX_REQUESTS;
+    g_max_timeout = DEFAULT_TIMEOUT;
+    g_socket_cfg = NULL;
+    g_socket_path = NULL;
+    return OK;
+}
+
+static int oorx_post_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptemp,
+                            server_rec *s)
+{
+    apr_pool_t *pp = pconf;
+    oorx_gen *g;
+    char **argv;
+    (void)plog; (void)ptemp;
+
+    g_socket_path = g_socket_cfg;
+    if (g_host_none) return OK;                /* the host is not ours    */
+    /* Like mod_cgid: nothing to start in the first, configuration-only,   */
+    /* pass of startup, nor when Apache only checks or dumps its config.  */
+    if (ap_state_query(AP_SQ_MAIN_STATE) == AP_SQ_MS_CREATE_PRE_CONFIG ||
+        ap_state_query(AP_SQ_RUN_MODE) != AP_SQ_RM_NORMAL)
+        return OK;
+
+    if (!g_socket_path) g_socket_path = ap_runtime_dir_relative(pconf, DEFAULT_SOCKET);
+
+    g = apr_pcalloc(pp, sizeof *g);
+    g->s = s;
+    if (apr_pool_create(&g->pool, pconf) != APR_SUCCESS) return HTTP_INTERNAL_SERVER_ERROR;
+    g->parent = getpid();
+    g->path = apr_pstrdup(pp, g_socket_path);
+    g->host = apr_pstrdup(pp, g_host ? g_host : OORX_DEFAULT_HOST);
+    if (access(g->host, X_OK) < 0) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, errno, s,
+                     "mod_oorexx: OoRexxHost %s is not an executable file", g->host);
+        return HTTP_INTERNAL_SERVER_ERROR;
+    }
+    if ((g->lfd = bind_socket(s, g->path)) < 0) return HTTP_INTERNAL_SERVER_ERROR;
+
+    argv = apr_pcalloc(pp, 14 * sizeof *argv);
+    argv[0]  = (char *)g->host;
+    argv[1]  = "--listen-fd";     argv[2]  = "3";
+    argv[3]  = "--processes";     argv[4]  = apr_itoa(pp, g_min_procs);
+    argv[5]  = "--max-processes"; argv[6]  = apr_itoa(pp, g_max_procs);
+    argv[7]  = "--max-requests";  argv[8]  = apr_itoa(pp, g_max_requests);
+    /* A drained host gets as long as the longest phase may last, and a   */
+    /* margin, before what is left is killed.                              */
+    argv[9]  = "--grace";         argv[10] = apr_itoa(pp, g_max_timeout + 10);
+    argv[11] = NULL;
+    g->argv = argv;
+
+    apr_pool_cleanup_register(pconf, g, end_generation, apr_pool_cleanup_null);
+    g_gen = g;
+    return start_host(g) == 0 ? OK : HTTP_INTERNAL_SERVER_ERROR;
+}
+
+static void oorx_child_init(apr_pool_t *p, server_rec *s)
+{
+    (void)p; (void)s;
+    /* A worker only connects; the listening socket is the parent's.       */
+    if (g_gen && g_gen->lfd >= 0) close(g_gen->lfd);
+}
 
 /* ------------------------------------------------------------------------ */
 /* The connection to the host, and the frame pump                           */
@@ -119,17 +444,30 @@ static int connect_host(request_rec *r, const char *path, int timeout)
     struct timeval tv;
     int fd;
 
+    apr_interval_time_t delay = CONNECT_FIRST_DELAY, waited = 0;
+
     if (strlen(path) >= sizeof sa.sun_path) return -1;
-    fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) return -1;
     memset(&sa, 0, sizeof sa);
     sa.sun_family = AF_UNIX;
     strcpy(sa.sun_path, path);
-    if (connect(fd, (struct sockaddr *)&sa, sizeof sa) < 0) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r,
-                      "mod_oorexx: cannot connect to oorexx-host at %s", path);
+    /* While Apache rereads its configuration, the old generation's socket */
+    /* is gone and the new one is not there yet (ENOENT, ECONNREFUSED);    */
+    /* mod_cgid retries in the same way. A full queue is EAGAIN.           */
+    for (;;) {
+        fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (fd < 0) return -1;
+        if (connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0) break;
+        if ((errno != ENOENT && errno != ECONNREFUSED && errno != EAGAIN) ||
+            waited >= CONNECT_BUDGET) {
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r,
+                          "mod_oorexx: cannot connect to oorexx-host at %s", path);
+            close(fd);
+            return -1;
+        }
         close(fd);
-        return -1;
+        apr_sleep(delay);
+        waited += delay;
+        if (delay < CONNECT_MAX_DELAY) delay *= 2;
     }
     /* The host halts the program at the deadline; this margin only guards
      * against a host that does not answer at all. */
@@ -255,7 +593,6 @@ static int append_kv(apr_pool_t *p, char **buf, apr_size_t *len, apr_size_t *cap
 
 static int oorx_cgi_handler(request_rec *r)
 {
-    oorx_server_cfg *scfg;
     oorx_dir_cfg *dcfg;
     oorx_conn *c;
     char **env, *vars = NULL, *begin;
@@ -266,7 +603,6 @@ static int oorx_cgi_handler(request_rec *r)
 
     if (strcmp(r->handler, "oorexx-cgi")) return DECLINED;
 
-    scfg = ap_get_module_config(r->server->module_config, &oorexx_module);
     dcfg = ap_get_module_config(r->per_dir_config, &oorexx_module);
     timeout = dcfg->timeout > 0 ? dcfg->timeout : DEFAULT_TIMEOUT;
 
@@ -291,8 +627,9 @@ static int oorx_cgi_handler(request_rec *r)
                       "mod_oorexx: attempt to invoke directory as script: %s", r->filename);
         return HTTP_FORBIDDEN;
     }
-    if (!scfg->socket) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "mod_oorexx: OoRexxSocket is not set");
+    if (!g_socket_path) {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                      "mod_oorexx: OoRexxHost is none and OoRexxSocket is not set");
         return HTTP_INTERNAL_SERVER_ERROR;
     }
 
@@ -310,7 +647,7 @@ static int oorx_cgi_handler(request_rec *r)
 
     c = apr_pcalloc(r->pool, sizeof *c);
     c->r = r;
-    c->fd = connect_host(r, scfg->socket, timeout);
+    c->fd = connect_host(r, g_socket_path, timeout);
     if (c->fd < 0) return HTTP_SERVICE_UNAVAILABLE;
     apr_pool_cleanup_register(r->pool, (void *)(apr_uintptr_t)c->fd, close_fd,
                               apr_pool_cleanup_null);
@@ -370,6 +707,9 @@ static int oorx_cgi_handler(request_rec *r)
 static void register_hooks(apr_pool_t *p)
 {
     (void)p;
+    ap_hook_pre_config(oorx_pre_config, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_post_config(oorx_post_config, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_child_init(oorx_child_init, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_handler(oorx_cgi_handler, NULL, NULL, APR_HOOK_MIDDLE);
 }
 
@@ -377,8 +717,8 @@ AP_DECLARE_MODULE(oorexx) = {
     STANDARD20_MODULE_STUFF,
     create_dir_cfg,
     merge_dir_cfg,
-    create_server_cfg,
-    merge_server_cfg,
+    NULL,
+    NULL,
     oorx_cmds,
     register_hooks
 };

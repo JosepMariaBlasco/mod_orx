@@ -15,8 +15,13 @@ all: module host
 
 module: module/.libs/mod_oorexx.so
 
-module/.libs/mod_oorexx.so: module/mod_oorexx.c include/oorexx_protocol.h
+module/.libs/mod_oorexx.so: module/mod_oorexx.c include/oorexx_protocol.h build/config.h
 	$(APXS) -c -Wc,-Wall module/mod_oorexx.c
+
+# Where the module looks for oorexx-host when OoRexxHost is not set.
+build/config.h: Makefile
+	mkdir -p build
+	printf '#define OORX_DEFAULT_HOST "%s"\n' "$(BINDIR)/oorexx-host" > $@
 
 host: build/oorexx-host
 

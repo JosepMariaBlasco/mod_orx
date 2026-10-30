@@ -4,9 +4,13 @@
 # RexxHTTP's own runner deploys its sources, fixtures and Apache config with
 # the standard CGI setup (mod_cgid). This script then swaps the CGI handler
 # for oorexx-cgi, disables mod_cgid so that nothing can fall back to it,
-# starts oorexx-host, and runs the suite unchanged. Green means the same
+# and runs the suite unchanged. Apache itself starts oorexx-host (the module
+# manages it); nothing is started by hand. Green means the same
 # counts as under mod_cgid, with 0 failures, 0 errors and an empty
 # error.log.
+#
+# OOREXX_PROCESSES ("min max") and OOREXX_MAX_REQUESTS override the pool's
+# configuration.
 #
 # Requirements: Debian/Ubuntu Apache (a2enmod & co.), ooRexx, mod_oorexx and
 # oorexx-host installed (make install), a RexxHTTP checkout, run as root.
@@ -17,8 +21,6 @@
 
 set -e
 REXXHTTP=${1:?usage: $0 /path/to/rexxhttp}
-SOCK_DIR=/run/oorexx
-SOCK=$SOCK_DIR/host.sock
 CONF=/etc/apache2/conf-available/rexx-cgi.conf
 
 # The RexxHTTP runner calls sudo; inside a root-only container there is none.
@@ -39,19 +41,13 @@ cat > /etc/apache2/mods-available/oorexx.load <<EOF
 LoadModule oorexx_module $(apxs -q LIBEXECDIR)/mod_oorexx.so
 EOF
 cat > /etc/apache2/mods-available/oorexx.conf <<EOF
-OoRexxSocket $SOCK
+OoRexxHost $(command -v oorexx-host)
+OoRexxProcesses ${OOREXX_PROCESSES:-2 8}
+OoRexxMaxRequests ${OOREXX_MAX_REQUESTS:-1000}
 OoRexxTimeout 30
 EOF
 a2enmod oorexx >/dev/null
 a2dismod -f cgid >/dev/null 2>&1 || true
-
-echo "== Starting oorexx-host"
-mkdir -p "$SOCK_DIR"
-chown www-data:www-data "$SOCK_DIR"
-chmod 700 "$SOCK_DIR"
-M=$(pgrep -x -o oorexx-host || true); [ -n "$M" ] && kill "$M" && sleep 1
-runuser -u www-data -- oorexx-host --socket "$SOCK" --processes 4 &
-sleep 2
 
 apachectl -k restart
 sleep 1
