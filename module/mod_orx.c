@@ -11,6 +11,19 @@
  *     the semantics of mod_cgi (same checks, same environment, same header
  *     parsing, same Location handling), but in an oorexx-host process
  *     instead of a fork+exec per request.
+ *   - Rexx programs in three more phases, through Apache's own mechanisms:
+ *     an authentication provider ("AuthBasicProvider oorexx", with the
+ *     program in OoRexxAuthnProgram), an authorization provider ("Require
+ *     oorexx program [words]") and a logging hook (OoRexxLogHook). Such a
+ *     program gets the CGI environment and its arguments, and its return
+ *     value is the verdict:
+ *
+ *       phase  arguments                  1        0        no value
+ *       authn  user, password             granted  denied   user not found
+ *       authz  user ("" if none), words   granted  denied   neutral
+ *       log    status, bytes, microsecs   (the value is ignored)
+ *
+ *     Any other value, or an error in the program, is a general error (500).
  *   - The host's life cycle, in the manner of mod_cgid's daemon: the module
  *     binds the socket (as root, in Apache's run-time directory, owned by
  *     Apache's User), starts oorexx-host on it in post_config, restarts it
@@ -23,6 +36,10 @@
  *   OoRexxMaxRequests 1000                    # phases per host process
  *   OoRexxTimeout 60
  *   <Directory ...>  Options +ExecCGI  AddHandler oorexx-cgi .rex  </Directory>
+ *   <Location ...>   AuthType Basic  AuthName x  AuthBasicProvider oorexx
+ *                    OoRexxAuthnProgram /path/authn.rex
+ *                    Require oorexx /path/authz.rex admins     </Location>
+ *   OoRexxLogHook /path/log.rex
  */
 
 #include "httpd.h"
@@ -36,6 +53,8 @@
 #include "mod_unixd.h"
 #include "apr_strings.h"
 #include "apr_thread_proc.h"
+#include "ap_provider.h"
+#include "mod_auth.h"
 
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -76,7 +95,11 @@ static int  g_min_procs, g_max_procs, g_max_requests;
 static int  g_max_timeout;          /* the largest OoRexxTimeout anywhere  */
 static const char *g_socket_cfg;    /* OoRexxSocket; NULL = the default    */
 
-typedef struct { int timeout; } oorx_dir_cfg;   /* -1 = unset */
+typedef struct {
+    int         timeout;        /* -1 = unset                            */
+    const char *authn_program;  /* OoRexxAuthnProgram; NULL = unset      */
+    const char *log_hook;       /* OoRexxLogHook; NULL = unset, "" = off */
+} oorx_dir_cfg;
 
 static void *create_dir_cfg(apr_pool_t *p, char *dir)
 {
@@ -90,7 +113,27 @@ static void *merge_dir_cfg(apr_pool_t *p, void *basev, void *addv)
 {
     oorx_dir_cfg *base = basev, *add = addv, *c = apr_pcalloc(p, sizeof *c);
     c->timeout = add->timeout >= 0 ? add->timeout : base->timeout;
+    c->authn_program = add->authn_program ? add->authn_program : base->authn_program;
+    c->log_hook = add->log_hook ? add->log_hook : base->log_hook;
     return c;
+}
+
+/* A program path in a directive: relative to ServerRoot, like ScriptAlias. */
+static const char *set_program(cmd_parms *cmd, void *dcfg, const char *arg)
+{
+    oorx_dir_cfg *c = dcfg;
+    const char *path = ap_server_root_relative(cmd->pool, arg);
+    if (!path) return apr_pstrcat(cmd->pool, "Invalid path: ", arg, NULL);
+    if (cmd->info == (void *)1) c->authn_program = path;
+    else c->log_hook = path;
+    return NULL;
+}
+
+static const char *set_log_hook(cmd_parms *cmd, void *dcfg, const char *arg)
+{
+    oorx_dir_cfg *c = dcfg;
+    if (!strcasecmp(arg, "none")) { c->log_hook = ""; return NULL; }
+    return set_program(cmd, dcfg, arg);
 }
 
 static const char *set_socket(cmd_parms *cmd, void *dummy, const char *arg)
@@ -165,6 +208,10 @@ static const command_rec oorx_cmds[] = {
                    "Minimum and maximum number of oorexx-host processes"),
     AP_INIT_TAKE1("OoRexxMaxRequests", set_max_requests, NULL, RSRC_CONF,
                   "Phases an oorexx-host process serves before it is replaced (0 = no limit)"),
+    AP_INIT_TAKE1("OoRexxAuthnProgram", set_program, (void *)1, RSRC_CONF | ACCESS_CONF,
+                  "The Rexx program behind \"AuthBasicProvider oorexx\""),
+    AP_INIT_TAKE1("OoRexxLogHook", set_log_hook, NULL, RSRC_CONF | ACCESS_CONF,
+                  "A Rexx program to run in the logging phase, or \"none\""),
     {NULL}
 };
 
@@ -436,6 +483,8 @@ typedef struct {
     int          failed;       /* the connection broke */
     int          has_body;     /* ap_should_client_block said yes */
     uint32_t     status;       /* from RESULT */
+    const char  *value;        /* from RESULT: what the program returned, */
+                               /* or NULL if it returned nothing           */
 } oorx_conn;
 
 static int connect_host(request_rec *r, const char *path, int timeout)
@@ -528,9 +577,11 @@ static int pump(oorx_conn *c)
             break;
         }
         case OORX_RESULT: {
-            unsigned char s[4];
-            if (len != 4 || oorx_read_all(c->fd, s, 4) < 0) { c->failed = 1; break; }
-            c->status = oorx_get_u32(s);
+            char *m = apr_palloc(c->r->pool, len + 1);
+            if (len < 4 || oorx_read_all(c->fd, m, len) < 0) { c->failed = 1; break; }
+            m[len] = '\0';
+            c->status = oorx_get_u32((unsigned char *)m);
+            c->value = flags & OORX_FLAG_VALUE ? m + 4 : NULL;
             c->done = 1;
             break;
         }
@@ -574,21 +625,26 @@ static apr_status_t close_fd(void *data)
 /* The oorexx-cgi handler                                                   */
 /* ------------------------------------------------------------------------ */
 
-static int append_kv(apr_pool_t *p, char **buf, apr_size_t *len, apr_size_t *cap,
-                     const char *k, apr_size_t kl, const char *v, apr_size_t vl)
+/* Tables on the wire: strings as (u32 length, bytes), one after another. */
+static void append_str(apr_pool_t *p, char **buf, apr_size_t *len, apr_size_t *cap,
+                       const char *v, apr_size_t vl)
 {
-    apr_size_t need = *len + 8 + kl + vl;
+    apr_size_t need = *len + 4 + vl;
     if (need > *cap) {
         apr_size_t cap2 = need * 2;
         char *nb = apr_palloc(p, cap2);
         if (*len) memcpy(nb, *buf, *len);
         *buf = nb; *cap = cap2;
     }
-    oorx_put_u32((unsigned char *)*buf + *len, (uint32_t)kl); *len += 4;
-    memcpy(*buf + *len, k, kl); *len += kl;
     oorx_put_u32((unsigned char *)*buf + *len, (uint32_t)vl); *len += 4;
     memcpy(*buf + *len, v, vl); *len += vl;
-    return 1;
+}
+
+static void append_kv(apr_pool_t *p, char **buf, apr_size_t *len, apr_size_t *cap,
+                      const char *k, apr_size_t kl, const char *v, apr_size_t vl)
+{
+    append_str(p, buf, len, cap, k, kl);
+    append_str(p, buf, len, cap, v, vl);
 }
 
 static int oorx_cgi_handler(request_rec *r)
@@ -704,13 +760,188 @@ static int oorx_cgi_handler(request_rec *r)
     return OK;
 }
 
+/* ------------------------------------------------------------------------ */
+/* Hooks: authentication, authorization and logging                         */
+/*                                                                          */
+/* A hook program gets the CGI environment (built on a copy of             */
+/* subprocess_env, so that running it changes nothing in the request) and   */
+/* its arguments, and returns a value: its verdict. See the table at the    */
+/* top of this file.                                                        */
+/* ------------------------------------------------------------------------ */
+
+/* Run one hook phase. Returns the status in RESULT (0 = the program ran),   */
+/* or -1 if the host could not be reached or the connection broke; *value   */
+/* is what the program returned, or NULL if it returned nothing.            */
+static int run_hook(request_rec *r, int phase, const char *program,
+                    const char **args, int nargs, const char **value)
+{
+    oorx_dir_cfg *dcfg = ap_get_module_config(r->per_dir_config, &orx_module);
+    int timeout = dcfg->timeout > 0 ? dcfg->timeout : DEFAULT_TIMEOUT;
+    apr_table_t *saved = r->subprocess_env;
+    char **env, *vars = NULL, *abuf = NULL, *begin;
+    apr_size_t vlen = 0, vcap = 0, alen = 0, acap = 0, plen;
+    oorx_conn *c;
+    int i;
+
+    *value = NULL;
+    if (!g_socket_path) {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                      "mod_orx: OoRexxHost is none and OoRexxSocket is not set");
+        return -1;
+    }
+
+    r->subprocess_env = apr_table_copy(r->pool, saved);
+    ap_add_common_vars(r);
+    if (r->uri && r->filename) ap_add_cgi_vars(r);
+    env = ap_create_environment(r->pool, r->subprocess_env);
+    r->subprocess_env = saved;
+    for (i = 0; env[i]; i++) {
+        const char *eq = strchr(env[i], '=');
+        if (!eq) continue;
+        append_kv(r->pool, &vars, &vlen, &vcap, env[i], eq - env[i], eq + 1, strlen(eq + 1));
+    }
+    for (i = 0; i < nargs; i++)
+        append_str(r->pool, &abuf, &alen, &acap, args[i], strlen(args[i]));
+
+    c = apr_pcalloc(r->pool, sizeof *c);
+    c->r = r;
+    c->fd = connect_host(r, g_socket_path, timeout);
+    if (c->fd < 0) return -1;
+    apr_pool_cleanup_register(r->pool, (void *)(apr_uintptr_t)c->fd, close_fd,
+                              apr_pool_cleanup_null);
+
+    plen = strlen(program);
+    begin = apr_palloc(r->pool, 7 + plen);
+    begin[0] = OORX_PROTOCOL_VERSION;
+    begin[1] = (char)phase;
+    begin[2] = OORX_CLASS_NATIVE;
+    oorx_put_u32((unsigned char *)begin + 3, (uint32_t)timeout);
+    memcpy(begin + 7, program, plen);
+    if (oorx_send(c->fd, OORX_BEGIN, 0, begin, (uint32_t)(7 + plen)) < 0 ||
+        oorx_send(c->fd, OORX_ARGS, 0, abuf, (uint32_t)alen) < 0 ||
+        oorx_send(c->fd, OORX_VARS, 0, vars, (uint32_t)vlen) < 0) {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r, "mod_orx: cannot talk to oorexx-host");
+        return -1;
+    }
+    discard_output(c);                   /* a hook's output went to the log */
+    if (!c->done) {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r,
+                      "mod_orx: connection to oorexx-host lost while running %s", program);
+        return -1;
+    }
+    *value = c->value;
+    return (int)c->status;
+}
+
+/* "1", "0" or nothing; anything else is reported and counts as an error.   */
+enum { VERDICT_ERROR, VERDICT_YES, VERDICT_NO, VERDICT_NONE };
+
+static int verdict(request_rec *r, const char *program, int status, const char *value)
+{
+    if (status != 0) return VERDICT_ERROR;   /* the host has logged why */
+    if (!value) return VERDICT_NONE;
+    if (!strcmp(value, "1")) return VERDICT_YES;
+    if (!strcmp(value, "0")) return VERDICT_NO;
+    ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                  "mod_orx: %s returned \"%s\"; expected 1, 0 or no value",
+                  program, value);
+    return VERDICT_ERROR;
+}
+
+/* AuthBasicProvider oorexx: the program in OoRexxAuthnProgram.             */
+static authn_status oorx_check_password(request_rec *r, const char *user,
+                                        const char *password)
+{
+    oorx_dir_cfg *dcfg = ap_get_module_config(r->per_dir_config, &orx_module);
+    const char *args[2], *value;
+    int status;
+    if (!dcfg->authn_program) {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                      "mod_orx: AuthBasicProvider oorexx, but no OoRexxAuthnProgram");
+        return AUTH_GENERAL_ERROR;
+    }
+    args[0] = user; args[1] = password;
+    status = run_hook(r, OORX_PHASE_AUTHN, dcfg->authn_program, args, 2, &value);
+    switch (verdict(r, dcfg->authn_program, status, value)) {
+    case VERDICT_YES:  return AUTH_GRANTED;
+    case VERDICT_NO:   return AUTH_DENIED;
+    case VERDICT_NONE: return AUTH_USER_NOT_FOUND;
+    default:           return AUTH_GENERAL_ERROR;
+    }
+}
+
+static const authn_provider oorx_authn_provider = { oorx_check_password, NULL };
+
+/* Require oorexx program [words...]                                        */
+typedef struct { const char *program, *words; } oorx_require;
+
+static const char *oorx_parse_require(cmd_parms *cmd, const char *line,
+                                      const void **parsed)
+{
+    oorx_require *q = apr_pcalloc(cmd->pool, sizeof *q);
+    const char *t = line;
+    char *prog = ap_getword_conf(cmd->pool, &t);
+    if (!*prog) return "Require oorexx: the program is missing";
+    q->program = ap_server_root_relative(cmd->pool, prog);
+    if (!q->program) return apr_pstrcat(cmd->pool, "Require oorexx: invalid path: ", prog, NULL);
+    while (*t == ' ' || *t == '\t') t++;
+    q->words = apr_pstrdup(cmd->pool, t);
+    *parsed = q;
+    return NULL;
+}
+
+/* The program runs with or without a user. Apache asks first without one;  */
+/* where authentication is configured, a "no" then means "no, not without   */
+/* knowing who you are", which makes Apache authenticate and ask again      */
+/* (AUTHZ_DENIED_NO_USER). Where it is not, a "no" is a plain no: there is  */
+/* nobody to ask (measured: Apache answers 500 otherwise, AH00027).         */
+static authz_status oorx_check_authz(request_rec *r, const char *line,
+                                     const void *parsed)
+{
+    const oorx_require *q = parsed;
+    const char *args[2], *value;
+    int status;
+    (void)line;
+    args[0] = r->user ? r->user : "";
+    args[1] = q->words;
+    status = run_hook(r, OORX_PHASE_AUTHZ, q->program, args, 2, &value);
+    switch (verdict(r, q->program, status, value)) {
+    case VERDICT_YES:  return AUTHZ_GRANTED;
+    case VERDICT_NO:   return r->user || !ap_auth_type(r) ? AUTHZ_DENIED
+                                                          : AUTHZ_DENIED_NO_USER;
+    case VERDICT_NONE: return AUTHZ_NEUTRAL;
+    default:           return AUTHZ_GENERAL_ERROR;
+    }
+}
+
+static const authz_provider oorx_authz_provider = { oorx_check_authz, oorx_parse_require };
+
+/* OoRexxLogHook: after the response, with what was finally sent.           */
+static int oorx_log_transaction(request_rec *r)
+{
+    oorx_dir_cfg *dcfg = ap_get_module_config(r->per_dir_config, &orx_module);
+    request_rec *last = r;
+    const char *args[3], *value;
+    if (!dcfg->log_hook || !*dcfg->log_hook) return DECLINED;
+    while (last->next) last = last->next;          /* after internal redirects */
+    args[0] = apr_itoa(r->pool, last->status);
+    args[1] = apr_off_t_toa(r->pool, last->bytes_sent);
+    args[2] = apr_psprintf(r->pool, "%" APR_TIME_T_FMT, apr_time_now() - r->request_time);
+    run_hook(r, OORX_PHASE_LOG, dcfg->log_hook, args, 3, &value);
+    return DECLINED;                               /* other loggers run too */
+}
+
 static void register_hooks(apr_pool_t *p)
 {
-    (void)p;
     ap_hook_pre_config(oorx_pre_config, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_post_config(oorx_post_config, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_child_init(oorx_child_init, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_handler(oorx_cgi_handler, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_log_transaction(oorx_log_transaction, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_register_auth_provider(p, AUTHN_PROVIDER_GROUP, "oorexx", AUTHN_PROVIDER_VERSION,
+                              &oorx_authn_provider, AP_AUTH_INTERNAL_PER_CONF);
+    ap_register_auth_provider(p, AUTHZ_PROVIDER_GROUP, "oorexx", AUTHZ_PROVIDER_VERSION,
+                              &oorx_authz_provider, AP_AUTH_INTERNAL_PER_CONF);
 }
 
 AP_DECLARE_MODULE(orx) = {

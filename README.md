@@ -1,16 +1,18 @@
 # mod_orx
 
 An Apache HTTP Server module for [ooRexx](https://sourceforge.net/projects/oorexx/):
-Rexx programs as CGI scripts without a fork per request, and, later, Rexx
-code attached to the other phases of Apache's request cycle
-(authentication, authorization, logging...), which a CGI cannot reach.
+Rexx programs as CGI scripts without a fork per request, and Rexx code
+attached to the other phases of Apache's request cycle (authentication,
+authorization, logging...), which a CGI cannot reach.
 
 **Status: milestone 1.** The content handler `oorexx-cgi` works and passes
 the full [RexxHTTP](https://rexx.epbcn.com/rexxhttp/) HTTP test suite
 unchanged, in place of mod_cgid, under both the event and the prefork MPM.
-Apache starts, watches and restarts the host itself. The other phases, the
-native and mod_rexx-compatible program classes, and Windows are still to
-come. Not for production yet.
+Apache starts, watches and restarts the host itself. Rexx programs can also
+authenticate users, authorize requests and log them, through Apache's own
+provider mechanisms. The remaining phases, the native and
+mod_rexx-compatible program classes, and Windows are still to come. Not for
+production yet.
 
 ## Design in one page
 
@@ -114,9 +116,56 @@ OoRexxTimeout 60
 | `OoRexxProcesses min [max]` | `2 8` | Size of the host's pool. With a single number, the pool has a fixed size. |
 | `OoRexxMaxRequests n` | `1000` | Phases a host process serves before it is replaced (`0`: no limit). |
 | `OoRexxTimeout seconds` | `60` | Deadline of a phase; also valid per directory. A drained host gets the largest one, plus 10 seconds, before what is left is killed. |
+| `OoRexxAuthnProgram path` | none | The program behind `AuthBasicProvider oorexx`. Per directory. |
+| `OoRexxLogHook path` \| `none` | none | A program to run in the logging phase. Per directory; `none` switches off an inherited one. |
 
-All of them except `OoRexxTimeout` are global: they cannot appear inside
-`<VirtualHost>`.
+`OoRexxHost`, `OoRexxSocket`, `OoRexxProcesses` and `OoRexxMaxRequests` are
+global: they cannot appear inside `<VirtualHost>`.
+Program paths are relative to `ServerRoot`, as in `ScriptAlias`.
+
+### Authentication, authorization and logging
+
+These phases use the mechanisms Apache already has, so they combine with
+everything else in the usual way:
+
+```apache
+<Location "/private/">
+    AuthType Basic
+    AuthName "Private"
+    AuthBasicProvider oorexx file          # Rexx first, then a password file
+    AuthUserFile /etc/apache2/users
+    OoRexxAuthnProgram /srv/rexx/authn.rex
+    Require oorexx /srv/rexx/authz.rex admins editors
+</Location>
+
+OoRexxLogHook /srv/rexx/log.rex
+```
+
+Such a program gets the CGI environment, as a CGI would (without the
+request body; the `Authorization` header only with `CGIPassAuth On`, as for
+a CGI), plus its arguments; what it returns is its verdict:
+
+| Phase | `Use Arg` | Returns `1` | Returns `0` | Returns nothing |
+|---|---|---|---|---|
+| authentication | user, password | granted | denied | user not found: the next provider decides |
+| authorization | user (`""` if none), the rest of the `Require` line | granted | denied | neutral: the other `Require` lines decide |
+| logging | status, bytes sent, microseconds since the request arrived | (ignored) | (ignored) | (ignored) |
+
+Any other value, an error in the program, or a program that runs past
+`OoRexxTimeout` is a general error: a line in the error log and, in
+authentication and authorization, a 500.
+What such a program says with `Say` goes to the error log too, since there
+is no client to send it to.
+
+Two things work as they do in Apache's own providers. Apache asks
+authorization first without a user: where authentication is configured, a
+`0` then makes it authenticate and ask again (so the program runs twice);
+where it is not, a `0` is a plain 403. An authenticated user who is not
+authorized gets a 401, as with `Require user`, unless
+`AuthzSendForbiddenOnFailure` is on.
+
+Each phase runs in a fresh interpreter instance, like a CGI: about 1.4 ms
+per hook, measured on a static file with a hook that only returns `1`.
 
 To debug the host (under a debugger, say), set `OoRexxHost none`, choose an
 `OoRexxSocket` in a directory that Apache's user owns, and start the host
@@ -139,6 +188,11 @@ with a single process replaced after every phase).
 graceful restarts with requests in flight, an upgraded module followed by a
 graceful and a hard restart, the death of each kind of host process, growth
 of the pool up to its maximum, and a stop with a program still running.
+
+`tests/phases.sh`, run after the suite, checks authentication,
+authorization and logging, alone and combined with Apache's own providers
+(`AuthBasicProvider ... file`, `RequireAny`, `RequireAll`, `Require ip`),
+including errors, timeouts and the error log.
 
 ## License
 

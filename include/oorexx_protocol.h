@@ -12,7 +12,7 @@
  * Nothing is ever parsed as text: lengths come first, always. Key/value
  * tables are sequences of (u32 length, bytes) pairs.
  *
- * Module -> host:  BEGIN, VARS, BODY
+ * Module -> host:  BEGIN, [ARGS], VARS, BODY
  * Host -> module:  READ, HEADERS, DATA, LOG, RESULT
  *
  * This header is shared by the module (C) and the host (C++). It holds only
@@ -39,17 +39,23 @@
 enum {
     OORX_BEGIN   = 'B',  /* M->H  u8 version, u8 phase, u8 class,
                                   u32 timeout (s), then the program path  */
+    OORX_ARGS    = 'A',  /* M->H  the program's arguments, as a sequence of
+                                  (u32 length, bytes); optional, between
+                                  BEGIN and VARS                           */
     OORX_VARS    = 'V',  /* M->H  key/value table (CGI environment)       */
     OORX_BODY    = 'b',  /* M->H  request body chunk; length 0 = EOF      */
     OORX_READ    = 'R',  /* H->M  u32: please send up to n body bytes     */
     OORX_HEADERS = 'H',  /* H->M  native class only (not used by cgi)     */
     OORX_DATA    = 'D',  /* H->M  response bytes; flag FLUSH = flush now  */
     OORX_LOG     = 'L',  /* H->M  u8 level, then the message              */
-    OORX_RESULT  = 'E'   /* H->M  u32 status (0 = OK), end of the phase   */
+    OORX_RESULT  = 'E'   /* H->M  u32 status (0 = OK), end of the phase;
+                                  with flag VALUE, the bytes after it are
+                                  what the program returned               */
 };
 
 /* Flags */
-#define OORX_FLAG_FLUSH 0x01
+#define OORX_FLAG_FLUSH 0x01     /* DATA: flush now                        */
+#define OORX_FLAG_VALUE 0x02     /* RESULT: the program returned a value   */
 
 /* Phases */
 enum { OORX_PHASE_CONTENT = 1, OORX_PHASE_AUTHN = 2, OORX_PHASE_AUTHZ = 3,

@@ -21,6 +21,10 @@
  *   - A child exits after --max-requests connections (the master replaces
  *     it): .environment is process-global and survives instances, so this
  *     bounds what a program can leak to later ones.
+ *   - Phases: content (a CGI program), and the hooks authn, authz and log.
+ *     A hook program gets the CGI environment, its arguments (ARGS), and
+ *     returns a value that the module reads as its verdict. Its output has
+ *     no client to go to, so it goes to the error log, like .error.
  *   - A watchdog thread Halt()s the instance when the phase's deadline
  *     passes. It only ever uses the INSTANCE API: using a thread context
  *     from a thread other than its own aborts the process (measured).
@@ -199,23 +203,26 @@ static RexxPackageEntry host_package = {
 };
 
 /* ------------------------------------------------------------------------ */
-/* The bootstrap: run in each fresh instance before the program, with the */
-/* path of the output pipe as its argument. It points every standard       */
-/* stream at the connection: output (Say, lineout(), charout(), .output,   */
-/* .stdout) to a real .Stream on the pipe; input (parse pull, linein(),    */
-/* charin(), .stdin) to the request body; .error, .stderr and trace output */
-/* to Apache's error log. .stdout and friends are process-wide objects, so */
-/* they must be replaced in .local, not only behind the monitors           */
-/* (measured). Returns the output stream, which the host closes at the end.*/
+/* The bootstrap: run in each fresh instance before the program, with the  */
+/* path of the output pipe and a hook flag as its arguments. It points     */
+/* every standard stream at the connection: output (Say, lineout(),        */
+/* charout(), .output, .stdout) to a real .Stream on the pipe -- or, in a  */
+/* hook, to the error log, since a hook has no client; input (parse pull,  */
+/* linein(), charin(), .stdin) to the request body; .error, .stderr and    */
+/* trace output to Apache's error log. .stdout and friends are             */
+/* process-wide objects, so they must be replaced in .local, not only      */
+/* behind the monitors (measured). Returns the output stream, which the    */
+/* host closes at the end.                                                 */
 /* ------------------------------------------------------------------------ */
 
 static const char bootstrap_src[] =
-"use strict arg pipe\n"
+"use strict arg pipe, hook\n"
 "out = .Stream~new(pipe)\n"
 "if out~open('WRITE APPEND') \\= 'READY:' then raise syntax 98.900 array('cannot open' pipe)\n"
 "in  = .OoRexxIn~new\n"
 "err = .OoRexxErr~new\n"
-".output~destination(out); .local~stdout = out\n"
+"dest = out; if hook then dest = err\n"
+".output~destination(dest); .local~stdout = dest\n"
 ".input~destination(in);   .local~stdin  = in\n"
 ".error~destination(err);  .local~stderr = err\n"
 ".traceOutput~destination(err)\n"
@@ -315,11 +322,24 @@ static void logf_conn(const char *fmt, const char *a)
     if (n > 0) send_log(OORX_LOG_ERR, buf, (size_t)n < sizeof buf ? n : sizeof buf - 1);
 }
 
-static void send_result(uint32_t status)
+static void send_result(uint32_t status, const std::string *value = NULL)
 {
-    unsigned char s[4];
-    oorx_put_u32(s, status);
-    send_frame(OORX_RESULT, 0, s, 4);
+    std::string p(4, '\0');
+    oorx_put_u32((unsigned char *)&p[0], status);
+    if (value) p += *value;
+    send_frame(OORX_RESULT, value ? OORX_FLAG_VALUE : 0, p.data(), (uint32_t)p.size());
+}
+
+/* A table of strings: (u32 length, bytes) after one another.               */
+static bool parse_strings(const std::string &t, std::vector<std::string> &out)
+{
+    for (size_t p = 0; p < t.size(); ) {
+        if (p + 4 > t.size()) return false;
+        uint32_t n = oorx_get_u32((const unsigned char *)&t[p]); p += 4;
+        if (p + n > t.size()) return false;
+        out.push_back(t.substr(p, n)); p += n;
+    }
+    return true;
 }
 
 static void serve(int fd)
@@ -341,14 +361,28 @@ static void serve(int fd)
     int phase = b[1], klass = b[2];
     unsigned timeout = oorx_get_u32(b + 3);
     std::string program = begin.substr(7);
-    if (phase != OORX_PHASE_CONTENT || klass != OORX_CLASS_CGI) {
+    /* The content phase runs CGI programs; the hooks (authn, authz, log)   */
+    /* run native ones: arguments in, a verdict out.                        */
+    bool hook = phase == OORX_PHASE_AUTHN || phase == OORX_PHASE_AUTHZ ||
+                phase == OORX_PHASE_LOG;
+    if (!(phase == OORX_PHASE_CONTENT && klass == OORX_CLASS_CGI) &&
+        !(hook && klass == OORX_CLASS_NATIVE)) {
         logf_conn("oorexx-host: phase/class not implemented yet for %s", program.c_str());
         send_result(501);
         return;
     }
 
+    /* ARGS (optional), then VARS.                                          */
+    std::vector<std::string> args;
+    if (oorx_recv_header(fd, &type, &flags, &len) < 0) return;
+    if (type == OORX_ARGS) {
+        std::string a(len, '\0');
+        if (len && oorx_read_all(fd, &a[0], len) < 0) return;
+        if (!parse_strings(a, args)) return;
+        if (oorx_recv_header(fd, &type, &flags, &len) < 0) return;
+    }
     /* VARS: becomes the process environment, exactly as a CGI's.          */
-    if (oorx_recv_header(fd, &type, &flags, &len) < 0 || type != OORX_VARS) return;
+    if (type != OORX_VARS) return;
     std::string vars(len, '\0');
     if (len && oorx_read_all(fd, &vars[0], len) < 0) return;
     clearenv();
@@ -379,6 +413,8 @@ static void serve(int fd)
     }
 
     uint32_t status = 0;
+    std::string value;
+    bool has_value = false;
     int pfd[2];
     pthread_t pump;
     if (pipe(pfd) < 0) {
@@ -395,17 +431,31 @@ static void serve(int fd)
                                             bootstrap_src, sizeof bootstrap_src - 1);
     RexxObjectPtr out = NULLOBJECT;
     if (boot != NULLOBJECT && !tc->CheckCondition()) {
-        RexxArrayObject args = tc->ArrayOfOne(tc->String(pipe_path));
-        out = tc->CallRoutine(boot, args);
+        RexxArrayObject bargs = tc->ArrayOfTwo(tc->String(pipe_path),
+                                               hook ? tc->True() : tc->False());
+        out = tc->CallRoutine(boot, bargs);
     }
     if (out == NULLOBJECT || tc->CheckCondition()) {
         tc->ClearCondition();
         logf_conn("oorexx-host: bootstrap failed%s", "");
         status = 500;
     } else {
+        RexxArrayObject pargs = NULLOBJECT;
+        if (!args.empty()) {
+            pargs = tc->NewArray(args.size());
+            for (size_t i = 0; i < args.size(); i++)
+                tc->ArrayPut(pargs, tc->NewString(args[i].data(), args[i].size()), i + 1);
+        }
         wd_arm(inst, timeout);
-        tc->CallProgram(program.c_str(), NULLOBJECT);
+        RexxObjectPtr ret = tc->CallProgram(program.c_str(), pargs);
         bool halted = wd_disarm();
+        if (!tc->CheckCondition() && ret != NULLOBJECT) {
+            RexxStringObject rs = tc->ObjectToString(ret);
+            if (!tc->CheckCondition() && rs != NULLOBJECT) {
+                value.assign(tc->StringData(rs), tc->StringLength(rs));
+                has_value = true;
+            }
+        }
         if (tc->CheckCondition()) {
             /* An uncaught condition: what a CGI would print on stderr.     */
             RexxCondition c;
@@ -420,6 +470,8 @@ static void serve(int fd)
             if (halted) m += " (phase timeout)";
             tc->ClearCondition();
             send_log(OORX_LOG_ERR, m.data(), m.size());
+            /* A CGI's failure shows in its output; a hook's is its verdict. */
+            if (hook) { status = 500; has_value = false; }
         }
         /* Close the program's output: flushes what the stream still holds. */
         tc->SendMessage0(out, "CLOSE");
@@ -428,7 +480,7 @@ static void serve(int fd)
     inst->Terminate();
     close(pfd[1]);
     pthread_join(pump, NULL);          /* all output forwarded */
-    send_result(status);
+    send_result(status, has_value ? &value : NULL);
 }
 
 /* ------------------------------------------------------------------------ */
