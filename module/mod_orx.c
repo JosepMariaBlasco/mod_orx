@@ -943,6 +943,7 @@ static int oorx_cgi_handler(request_rec *r)
 /*   v:  the initial variables, in the order they are set                  */
 /*   r:  s:  c:  fields of the request, its server and its connection      */
 /*   i:  e:  n:  x:  headers_in, subprocess_env, notes, err_headers_out    */
+/*   q:N  the same r: i: e: n: x: of related request N (next, prev, main)  */
 /*   E:  the CGI environment (the program's process environment)          */
 /*                                                                          */
 /* Measured against mod_rexx 2.4.0 (the last one) under Apache 2.4.        */
@@ -950,12 +951,14 @@ static int oorx_cgi_handler(request_rec *r)
 
 #define MODREXX_VERSION "Mod_Rexx/2.4.0"
 
-typedef struct { apr_pool_t *p; char **buf; apr_size_t *len, *cap; char kind; } snap_ctx;
+/* pre: for a related request, "q:" and its number, before the kind.       */
+typedef struct { apr_pool_t *p; char **buf; apr_size_t *len, *cap; char kind;
+                 const char *pre; } snap_ctx;
 
 static void snap(snap_ctx *x, const char *key, const char *value)
 {
-    char *k = apr_pstrcat(x->p, "?:", key, NULL);
-    k[0] = x->kind;
+    char *k = apr_pstrcat(x->p, x->pre ? x->pre : "", "?:", key, NULL);
+    k[x->pre ? strlen(x->pre) : 0] = x->kind;
     if (!value) value = "";
     append_kv(x->p, x->buf, x->len, x->cap, k, strlen(k), value, strlen(value));
 }
@@ -971,12 +974,63 @@ static void snap_int(snap_ctx *x, const char *key, long v)
     snap(x, key, apr_ltoa(x->p, v));
 }
 
+/* Requests related to the one of the phase, followed through next, prev   */
+/* and main: an internal redirect makes a chain of them (Apache allows 10). */
+#define MODREXX_RELATED 24
+
+static const char *rel_index(apr_pool_t *p, request_rec *to, request_rec **rel, int n)
+{
+    int m;
+    if (to) for (m = 0; m < n; m++) if (rel[m] == to) return apr_itoa(p, m);
+    return "";
+}
+
+/* One request: its fields ("r") and tables ("i", "e", "n", "x").          */
+static void snap_request(snap_ctx *x, request_rec *r, request_rec **rel, int n)
+{
+    x->kind = 'r';
+    snap(x, "the_request", r->the_request);
+    snap_int(x, "proxyreq", r->proxyreq);
+    snap_int(x, "header_only", r->header_only);
+    snap(x, "protocol", r->protocol);
+    snap(x, "status_line", r->status_line);
+    snap_int(x, "status", r->status);
+    snap(x, "method", r->method);
+    snap_int(x, "method_number", r->method_number);
+    snap_int(x, "allowed", (int)r->allowed);
+    snap_int(x, "bytes_sent", (int)r->bytes_sent);
+    snap(x, "content_type", r->content_type);
+    snap(x, "content_encoding", r->content_encoding);
+    snap(x, "handler", r->handler);
+    snap(x, "content_languages", r->content_languages ?
+         apr_array_pstrcat(r->pool, r->content_languages, ',') : NULL);
+    snap_int(x, "no_cache", r->no_cache);
+    snap(x, "uri", r->uri);
+    snap(x, "filename", r->filename);
+    snap(x, "path_info", r->path_info);
+    snap(x, "args", r->args);
+    snap(x, "finfo_stmode", apr_psprintf(r->pool, "%X", (unsigned)r->finfo.filetype));
+    snap(x, "user", r->user);
+    snap(x, "auth_type", r->ap_auth_type);
+    snap(x, "is_main", r->main ? "0" : "1");
+    snap(x, "url_prefix", ap_construct_url(r->pool, "", r));
+    snap(x, "remote_name", ap_get_remote_host(r->connection, r->per_dir_config,
+                                              REMOTE_NAME, NULL));
+    snap(x, "next", rel_index(r->pool, r->next, rel, n));
+    snap(x, "prev", rel_index(r->pool, r->prev, rel, n));
+    snap(x, "main", rel_index(r->pool, r->main, rel, n));
+    x->kind = 'i'; apr_table_do(snap_table, x, r->headers_in, NULL);
+    x->kind = 'e'; apr_table_do(snap_table, x, r->subprocess_env, NULL);
+    x->kind = 'n'; apr_table_do(snap_table, x, r->notes, NULL);
+    x->kind = 'x'; apr_table_do(snap_table, x, r->err_headers_out, NULL);
+}
+
 static char *modrexx_snapshot(request_rec *r, apr_array_header_t *setvars,
                               apr_size_t *vlen)
 {
     char *vars = NULL, **env;
     apr_size_t vcap = 0;
-    snap_ctx x = { r->pool, &vars, vlen, &vcap, 'v' };
+    snap_ctx x = { r->pool, &vars, vlen, &vcap, 'v', NULL };
     request_rec *sub;
     apr_table_t *saved = r->subprocess_env;
     int i;
@@ -1022,35 +1076,29 @@ static char *modrexx_snapshot(request_rec *r, apr_array_header_t *setvars,
     snap(&x, "WWWRSPCOMPILER", "rspcomp.rex");
     snap(&x, "WWWFNAMETEMPLATE", "./execrsp?????.rex");
 
-    /* What the WWW* functions read.                                       */
-    x.kind = 'r';
-    snap(&x, "the_request", r->the_request);
-    snap_int(&x, "proxyreq", r->proxyreq);
-    snap_int(&x, "header_only", r->header_only);
-    snap(&x, "protocol", r->protocol);
-    snap(&x, "status_line", r->status_line);
-    snap_int(&x, "status", r->status);
-    snap(&x, "method", r->method);
-    snap_int(&x, "method_number", r->method_number);
-    snap_int(&x, "allowed", (int)r->allowed);
-    snap_int(&x, "bytes_sent", (int)r->bytes_sent);
-    snap(&x, "content_type", r->content_type);
-    snap(&x, "content_encoding", r->content_encoding);
-    snap(&x, "handler", r->handler);
-    snap(&x, "content_languages", r->content_languages ?
-         apr_array_pstrcat(r->pool, r->content_languages, ',') : NULL);
-    snap_int(&x, "no_cache", r->no_cache);
-    snap(&x, "uri", r->uri);
-    snap(&x, "filename", r->filename);
-    snap(&x, "path_info", r->path_info);
-    snap(&x, "args", r->args);
-    snap(&x, "finfo_stmode", apr_psprintf(r->pool, "%X", (unsigned)r->finfo.filetype));
-    snap(&x, "user", r->user);
-    snap(&x, "auth_type", r->ap_auth_type);
-    snap(&x, "is_main", r->main ? "0" : "1");
-    snap(&x, "url_prefix", ap_construct_url(r->pool, "", r));
-    snap(&x, "remote_name", ap_get_remote_host(r->connection, r->per_dir_config,
-                                               REMOTE_NAME, NULL));
+    /* What the WWW* functions read: the request, and the requests related  */
+    /* to it (WWWReqRecNext, WWWReqRecPrev, WWWReqRecMain), read-only, each  */
+    /* with a number; the links are those numbers ("" for none).            */
+    {
+        request_rec *rel[MODREXX_RELATED];
+        int n = 1, k;
+        rel[0] = r;
+        for (k = 0; k < n; k++) {
+            request_rec *link[3];
+            int j, m;
+            link[0] = rel[k]->next; link[1] = rel[k]->prev; link[2] = rel[k]->main;
+            for (j = 0; j < 3; j++) {
+                if (!link[j]) continue;
+                for (m = 0; m < n && rel[m] != link[j]; m++) ;
+                if (m == n && n < MODREXX_RELATED) rel[n++] = link[j];
+            }
+        }
+        for (k = 0; k < n; k++) {
+            x.pre = k ? apr_psprintf(r->pool, "q:%d", k) : NULL;
+            snap_request(&x, rel[k], rel, n);
+        }
+        x.pre = NULL;
+    }
     x.kind = 's';
     snap(&x, "server_admin", r->server->server_admin);
     snap(&x, "server_hostname", r->server->server_hostname);
@@ -1058,10 +1106,6 @@ static char *modrexx_snapshot(request_rec *r, apr_array_header_t *setvars,
     snap_int(&x, "is_virtual", r->server->is_virtual);
     x.kind = 'c';
     snap_int(&x, "aborted", r->connection->aborted);
-    x.kind = 'i'; apr_table_do(snap_table, &x, r->headers_in, NULL);
-    x.kind = 'e'; apr_table_do(snap_table, &x, r->subprocess_env, NULL);
-    x.kind = 'n'; apr_table_do(snap_table, &x, r->notes, NULL);
-    x.kind = 'x'; apr_table_do(snap_table, &x, r->err_headers_out, NULL);
 
     /* The CGI environment, on a copy, so that it is not what              */
     /* WWWReqRecSubprocess_env reads.                                       */

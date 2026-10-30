@@ -69,6 +69,12 @@ vhost() {
     echo "    <Directory $DOC/forced>"
     echo "        ${1}Handler $PROG/Forced.rex"
     echo "    </Directory>"
+    echo "    <Directory $DOC/err>"
+    echo "        ErrorDocument 404 /Content.rex"
+    echo "    </Directory>"
+    echo "    <Directory $DOC/err2>"
+    echo "        ErrorDocument 404 /s.txt"
+    echo "    </Directory>"
     echo "    <Directory $DOC/nofix>"
     echo "        ${1}FixupHandler none"
     echo "    </Directory>"
@@ -76,7 +82,8 @@ vhost() {
 }
 
 echo "== Setup"
-mkdir -p "$DOC/auth" "$DOC/cauth" "$DOC/forced" "$DOC/nofix" "$PROG" "$LOGS"
+mkdir -p "$DOC/auth" "$DOC/cauth" "$DOC/forced" "$DOC/nofix" "$DOC/err" "$DOC/err2" \
+         "$PROG" "$LOGS"
 for ph in $PHASES Forced; do cp "$HERE/modrexx/phase.rex" "$PROG/$ph.rex"; done
 for d in "$DOC" "$DOC/auth" "$DOC/forced"; do cp "$HERE/modrexx/phase.rex" "$d/Content.rex"; done
 echo static > "$DOC/s.txt";       echo alt > "$DOC/alt.txt"

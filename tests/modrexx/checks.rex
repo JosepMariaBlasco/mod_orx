@@ -1,5 +1,5 @@
 /* checks.rex -- what mod_orx does where mod_rexx had no answer: a handle  */
-/* that is not one (mod_rexx crashed the worker), a function not yet      */
+/* that is not one (mod_rexx crashed the worker), a function that is not  */
 /* there, a POST that is not urlencoded (mod_rexx left WWWARGS.0 unset),   */
 /* and output through .output and lineout (mod_rexx had only Say).        */
 r = arg(1)
@@ -14,6 +14,8 @@ call try 'WWWCnxRecAborted(s)'
 call try 'WWWCnxRecAborted(c)'
 call try 'WWWReqRecUri(r,)'
 call try 'WWWReqRecNext(r)'
+call try 'WWWReqRecNext(s)'
+call try 'WWWSub_Req_Lookup_URI(r, "/")'
 call try 'WWWNoSuchThing(r)'
 say 'handles:' (r \== s & s \== c) left(r, 4) length(r)
 call WWWGetArgs r

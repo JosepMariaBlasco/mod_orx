@@ -350,9 +350,12 @@ static bool wd_disarm(void)
 /* worker on a bad pointer).                                                */
 /*                                                                          */
 /* Behaviour measured against mod_rexx 2.4.0, function by function.        */
-/* Not yet: subrequests (WWWSub_Req_Lookup_URI, WWWSub_Req_Lookup_File,     */
-/* WWWRun_Sub_Req) and WWWReqRecNext, WWWReqRecPrev, WWWReqRecMain; a call  */
-/* to one of them is "routine not found".                                   */
+/* WWWReqRecNext, WWWReqRecPrev and WWWReqRecMain give handles to read-only */
+/* snapshots of the related requests ("(nil)" if there is none). The        */
+/* subrequest functions (WWWSub_Req_Lookup_URI, WWWSub_Req_Lookup_File,     */
+/* WWWRun_Sub_Req) are not there, and a call to one is "routine not found": */
+/* under mod_rexx no program could use them (they returned the pointer in   */
+/* binary, which no other function took; measured).                         */
 /* ------------------------------------------------------------------------ */
 
 #define MODREXX_VERSION "Mod_Rexx/2.4.0"
@@ -365,15 +368,41 @@ struct nocase {
     { return strcasecmp(a.c_str(), b.c_str()) < 0; }
 };
 typedef std::map<std::string, std::string, nocase> table;
+typedef std::map<std::string, std::string> fields;
+
+/* A request related to the phase's (WWWReqRecNext, WWWReqRecPrev,          */
+/* WWWReqRecMain), read-only: its handle, fields and tables. Number 0 is    */
+/* the phase's own request, whose snapshot is the one below.               */
+struct related { std::string h; fields r; table in, env, notes, err; };
 
 static struct {
     bool armed;                     /* the program is running             */
     int  phase;                     /* OORX_PHASE_*                       */
     std::string rh, sh, ch;         /* the handles                        */
     std::vector<std::pair<std::string, std::string> > init;   /* v: */
-    std::map<std::string, std::string> r, s, c;               /* fields */
+    fields r, s, c;                 /* fields of the request, server... */
     table in, env, notes, err;      /* headers_in, subprocess_env, ...    */
+    std::vector<related> rel;       /* [0] unused: it is the above       */
 } g_mr;
+
+/* The number of the request whose handle h is (0: the phase's), or -1.     */
+static int request_of(const std::string &h)
+{
+    if (h == g_mr.rh) return 0;
+    for (size_t k = 1; k < g_mr.rel.size(); k++) if (h == g_mr.rel[k].h) return (int)k;
+    return -1;
+}
+
+static fields &fields_of(int q) { return q ? g_mr.rel[q].r : g_mr.r; }
+
+static table &table_of(int q, char kind)
+{
+    if (q) {
+        related &x = g_mr.rel[q];
+        return kind == 'i' ? x.in : kind == 'e' ? x.env : kind == 'n' ? x.notes : x.err;
+    }
+    return kind == 'i' ? g_mr.in : kind == 'e' ? g_mr.env : kind == 'n' ? g_mr.notes : g_mr.err;
+}
 
 static std::string new_handle(void)
 {
@@ -395,6 +424,7 @@ static void modrexx_load(const std::vector<std::pair<std::string, std::string> >
 {
     g_mr.init.clear(); g_mr.r.clear(); g_mr.s.clear(); g_mr.c.clear();
     g_mr.in.clear(); g_mr.env.clear(); g_mr.notes.clear(); g_mr.err.clear();
+    g_mr.rel.assign(1, related());
     for (size_t i = 0; i < kv.size(); i++) {
         const std::string &k = kv[i].first, &v = kv[i].second;
         if (k.size() < 2 || k[1] != ':') continue;
@@ -410,8 +440,21 @@ static void modrexx_load(const std::vector<std::pair<std::string, std::string> >
         case 'n': g_mr.notes.insert(std::make_pair(name, v)); break;
         case 'x': g_mr.err.insert(std::make_pair(name, v)); break;
         case 'E': setenv(name.c_str(), v.c_str(), 1); break;
+        case 'q': {                 /* q:N then a kind, ':' and the name   */
+            size_t e = 0;
+            unsigned long n = strtoul(name.c_str(), NULL, 10);
+            while (e < name.size() && isdigit((unsigned char)name[e])) e++;
+            if (!n || n > 64 || e + 2 > name.size() || name[e + 1] != ':') break;
+            if (g_mr.rel.size() <= n) g_mr.rel.resize(n + 1);
+            std::string f = name.substr(e + 2);
+            if (name[e] == 'r') g_mr.rel[n].r[f] = v;
+            else if (strchr("ienx", name[e]))
+                table_of((int)n, name[e]).insert(std::make_pair(f, v));
+            break;
+        }
         }
     }
+    for (size_t k = 1; k < g_mr.rel.size(); k++) g_mr.rel[k].h = new_handle();
     g_mr.rh = new_handle(); g_mr.sh = new_handle(); g_mr.ch = new_handle();
 }
 
@@ -593,11 +636,11 @@ static const struct { const char *fn, *key; } ro_fields[] = {
     { "WWWREQRECUSER", "user" },                { "WWWREQRECAUTH_TYPE", "auth_type" },
 };
 /* Tables: (r, key) reads, (r, key, value) writes.                          */
-static const struct { const char *fn; table *t; const char *op; } rw_tables[] = {
-    { "WWWREQRECHEADER_IN",      &g_mr.in,    "i" },
-    { "WWWREQRECERR_HEADER_OUT", &g_mr.err,   "x" },
-    { "WWWREQRECSUBPROCESS_ENV", &g_mr.env,   "e" },
-    { "WWWREQRECNOTES",          &g_mr.notes, "n" },
+static const struct { const char *fn, *op; } rw_tables[] = {
+    { "WWWREQRECHEADER_IN",      "i" },
+    { "WWWREQRECERR_HEADER_OUT", "x" },
+    { "WWWREQRECSUBPROCESS_ENV", "e" },
+    { "WWWREQRECNOTES",          "n" },
 };
 
 static int RexxEntry modrexx_ini(RexxExitContext *c, int, int sub, PEXIT)
@@ -629,6 +672,9 @@ static int RexxEntry modrexx_fnc(RexxExitContext *c, int, int sub, PEXIT parm)
     }
     bool bad = false;
     std::string ret;
+    /* Reads take any request of the phase (its own, or a related one);     */
+    /* writes, only its own.                                                */
+    int q = argc > 0 && fp->rxfnc_argv[0] != NULLOBJECT ? request_of(a[0]) : -1;
     /* "Argument i is there", and "argument i is this handle".             */
     #define ARG(i)     ((i) < argc && has[i])
     #define IS(i, h)   (ARG(i) && a[i] == (h))
@@ -642,7 +688,7 @@ static int RexxEntry modrexx_fnc(RexxExitContext *c, int, int sub, PEXIT parm)
     for (size_t i = 0; i < sizeof rw_fields / sizeof *rw_fields; i++) {
         const field &f = rw_fields[i];
         if (fn != f.fn) continue;
-        if (argc > 2 || !IS(0, g_mr.rh) || (argc == 2 && !ARG(1))) BAD();
+        if (argc > 2 || q < 0 || (argc == 2 && (!ARG(1) || q != 0))) BAD();
         if (argc == 2) {
             std::string v = f.numeric ? itos(atoi(a[1].c_str())) : a[1];
             std::string &cur = g_mr.r[f.key];
@@ -651,17 +697,18 @@ static int RexxEntry modrexx_fnc(RexxExitContext *c, int, int sub, PEXIT parm)
             send_update(f.op, "", v);
             if (!f.ret_new) RET("");
         }
-        RET(g_mr.r[f.key]);
+        RET(fields_of(q)[f.key]);
     }
     for (size_t i = 0; i < sizeof ro_fields / sizeof *ro_fields; i++) {
         if (fn != ro_fields[i].fn) continue;
-        if (argc > 1 || !IS(0, g_mr.rh)) BAD();
-        RET(g_mr.r[ro_fields[i].key]);
+        if (argc > 1 || q < 0) BAD();
+        RET(fields_of(q)[ro_fields[i].key]);
     }
     for (size_t i = 0; i < sizeof rw_tables / sizeof *rw_tables; i++) {
         if (fn != rw_tables[i].fn) continue;
-        if (argc < 2 || argc > 3 || !IS(0, g_mr.rh) || !ARG(1) || (argc == 3 && !ARG(2))) BAD();
-        table &t = *rw_tables[i].t;
+        if (argc < 2 || argc > 3 || q < 0 || !ARG(1) || (argc == 3 && (!ARG(2) || q != 0)))
+            BAD();
+        table &t = table_of(q, rw_tables[i].op[0]);
         if (argc == 2) {
             table::iterator e = t.find(a[1]);
             RET(e == t.end() ? "" : e->second);
@@ -737,8 +784,17 @@ static int RexxEntry modrexx_fnc(RexxExitContext *c, int, int sub, PEXIT parm)
         strftime(b, sizeof b, "%a %d %b %Y %T %Z", &tm);
         RET(b);
     }
+    if (fn == "WWWREQRECNEXT" || fn == "WWWREQRECPREV" || fn == "WWWREQRECMAIN") {
+        /* mod_rexx printed the pointer with %p: "(nil)" for none.         */
+        if (argc > 1 || q < 0) BAD();
+        const std::string &l = fields_of(q)[fn == "WWWREQRECNEXT" ? "next" :
+                                            fn == "WWWREQRECPREV" ? "prev" : "main"];
+        if (l.empty()) RET("(nil)");
+        size_t k = strtoul(l.c_str(), NULL, 10);
+        RET(k == 0 ? g_mr.rh : k < g_mr.rel.size() ? g_mr.rel[k].h : "(nil)");
+    }
     if (fn == "WWWREQRECSERVER" || fn == "WWWREQRECCONNECTION") {
-        if (argc > 1 || !IS(0, g_mr.rh)) BAD();
+        if (argc > 1 || q < 0) BAD();
         RET(fn == "WWWREQRECSERVER" ? g_mr.sh : g_mr.ch);
     }
     if (fn == "WWWSRVRECSERVER_ADMIN" || fn == "WWWSRVRECSERVER_HOSTNAME" ||

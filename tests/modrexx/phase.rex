@@ -14,6 +14,9 @@
 /*   syntax=1    a syntax error                                          */
 /*   redirect=u  WWWInternal_Redirect                                    */
 /*   args=1      WWWGetArgs, and log WWWARGS.0 and WWWPOST_STRING       */
+/*   wprev=u     write the uri of WWWReqRecPrev's request (read-only)    */
+/* The line has, for the requests WWWReqRecPrev, WWWReqRecNext and        */
+/* WWWReqRecMain give, their uri, status and main flag, or "(nil)".       */
 r = arg(1)
 parse source . . me
 tag = filespec('name', me)
@@ -33,6 +36,11 @@ call add 'env', WWWReqRecSubprocess_env(r, 'k')
 call add 'in', WWWReqRecHeader_in(r, 'X-In')
 call add 'stm', WWWReqRecFinfo_stmode(r)
 call add 'wfile', WWWFILENAME
+call add 'prev', rel(WWWReqRecPrev(r))
+n = WWWReqRecNext(r)
+call add 'next', rel(n)
+if n \== '(nil)' then call add 'back', WWWReqRecPrev(n) == r
+call add 'main', rel(WWWReqRecMain(r))
 ret = -1
 if tag == 'Content' | tag == 'Forced' then do
   say line
@@ -58,6 +66,7 @@ do w over WWWReqRecHeader_in(r, 'X-Act')~makeArray(' ')
     when 'log'      then call WWWLogError r, 'logged in' tag
     when 'syntax'   then x = 1 + 'a'
     when 'redirect' then call WWWInternal_Redirect r, v
+    when 'wprev'    then call WWWReqRecUri WWWReqRecPrev(r), v
     when 'args'     then do
       call WWWGetArgs r
       call add 'args', wwwargs.0
@@ -73,3 +82,7 @@ return ret
 add:
   line = line'|'arg(1)'='arg(2)
   return
+
+rel:
+  if arg(1) == '(nil)' then return '(nil)'
+  return WWWReqRecUri(arg(1))':'WWWReqRecStatus(arg(1))':'WWWReqRecIsMain(arg(1))

@@ -73,3 +73,9 @@ trans-uri       /s.txt            -H "X-Act: Trans.uri=/alt.txt"
 # A directory that switches the fixup program off ("none"; for Rexx*, a
 # program called "none", which does not exist, as under mod_rexx)
 nofix           /nofix/s.txt
+# Related requests (WWWReqRecPrev, WWWReqRecNext): an ErrorDocument to a
+# program (under mod_rexx, every internal redirect to one crashed), and to a
+# static file, where the original request's logging phase sees the other
+p-errdoc-rex    /err/missing?a=1
+p-errdoc-wprev  /err/missing      -H "X-Act: Content.wprev=/x"
+p-errdoc-static /err2/missing

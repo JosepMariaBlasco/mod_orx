@@ -302,9 +302,20 @@ under mod_rexx. The differences:
   added to Apache's own version string. `WWWGetVersion` and
   `WWWGATEWAY_INTERFACE` say `Mod_Rexx/2.4.0`, in case a program checks.
 - The program's process environment is the CGI environment.
-- Not yet: subrequests (`WWWSub_Req_Lookup_URI`, `WWWSub_Req_Lookup_File`,
-  `WWWRun_Sub_Req`) and `WWWReqRecNext`, `WWWReqRecPrev`, `WWWReqRecMain`.
-  A call to one of them is Error 43, routine not found.
+- An internal redirect to a program (`ErrorDocument 404 /error.rex`, an
+  `Action`) works; under mod_rexx it crashed Apache's process, for the same
+  reason as its `PostReadRequest` and `Trans` phases.
+- `WWWReqRecNext`, `WWWReqRecPrev` and `WWWReqRecMain` give a handle to the
+  related request, or `(nil)` when there is none, as mod_rexx did. The
+  related request can be read with the same functions, but not changed
+  (Error 40.1). So a page for an `ErrorDocument` finds the request that
+  failed with `WWWReqRecPrev`, and a `LogHandler` finds where a request
+  was redirected to with `WWWReqRecNext`.
+- The subrequest functions (`WWWSub_Req_Lookup_URI`,
+  `WWWSub_Req_Lookup_File`, `WWWRun_Sub_Req`) are not there: a call to one
+  is Error 43, routine not found. Under mod_rexx no program could use them:
+  they returned the request's pointer in binary, which no other function
+  took (and their documentation gives the arguments in the wrong order).
 
 `WWWInternal_Redirect` is done when the program ends, and what the program
 wrote is dropped, as mod_rexx's output was.
