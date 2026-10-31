@@ -8,6 +8,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == content
 HTTP/1.1 200 OK
   body: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=
@@ -19,6 +20,7 @@ HTTP/1.1 200 OK
   phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
   phase: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == unknown-type
 HTTP/1.1 200 OK
   body: x
@@ -29,6 +31,7 @@ HTTP/1.1 200 OK
   phase: Type|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == pathinfo
 HTTP/1.1 200 OK
   body: Content|main=1|uri=/Content.rex/a/b|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER
@@ -40,6 +43,7 @@ HTTP/1.1 200 OK
   phase: Fixup|main=1|uri=/Content.rex/a/b|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=/a/b|pt=/var/www/oorexx-phases/doc/a|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
   phase: Content|main=1|uri=/Content.rex/a/b|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=/a/b|pt=/var/www/oorexx-phases/doc/a|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/Content.rex/a/b|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=/a/b|pt=/var/www/oorexx-phases/doc/a|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == hp-ok
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -50,6 +54,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == hp-403
 HTTP/1.1 403 Forbidden
 Content-Type: text/html; charset=iso-8859-1
@@ -60,12 +65,14 @@ Content-Type: text/html; charset=iso-8859-1
   phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
   phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=403|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == hp-done
 HTTP/1.1 200 OK
   phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
   phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
   phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == hp-noval
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -76,6 +83,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == hp-text
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -86,6 +94,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == access-ok
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -96,6 +105,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == access-403
 HTTP/1.1 403 Forbidden
 Content-Type: text/html; charset=iso-8859-1
@@ -107,6 +117,7 @@ Content-Type: text/html; charset=iso-8859-1
   phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=403|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == access-500
 HTTP/1.1 500 Internal Server Error
 Content-Type: text/html; charset=iso-8859-1
@@ -118,6 +129,7 @@ Content-Type: text/html; charset=iso-8859-1
   phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == type-ok
 HTTP/1.1 200 OK
   body: x
@@ -128,6 +140,7 @@ HTTP/1.1 200 OK
   phase: Type|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == type-ct
 HTTP/1.1 200 OK
 Content-Type: text/x-a
@@ -139,6 +152,7 @@ Content-Type: text/x-a
   phase: Type|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=text/x-a|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=text/x-a|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == type-handler
 HTTP/1.1 200 OK
   phase: PostReadRequest|main=1|uri=/u.zzz|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
@@ -148,6 +162,7 @@ HTTP/1.1 200 OK
   phase: Type|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/u.zzz|file=/var/www/oorexx-phases/doc/u.zzz|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/u.zzz|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
   log: [orx:error]      1 *-* x
   log: [orx:error]        >>>   "X"
   log: [orx:error]        +++   "RC(30)"
@@ -161,6 +176,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == fixup-404
 HTTP/1.1 404 Not Found
 Content-Type: text/html; charset=iso-8859-1
@@ -173,6 +189,7 @@ Content-Type: text/html; charset=iso-8859-1
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=404|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == fixup-302
 HTTP/1.1 302 Found
 Content-Type: text/html; charset=iso-8859-1
@@ -185,6 +202,7 @@ Content-Type: text/html; charset=iso-8859-1
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=302|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == fixup-done
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -194,6 +212,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == log-ret
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -217,6 +236,7 @@ HTTP/1.1 200 OK
   phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
   phase: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == hp-uri
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -227,6 +247,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/alt.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/alt.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/alt.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == hp-file
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -238,6 +259,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == fixup-file
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -249,6 +271,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == fixup-ct
 HTTP/1.1 200 OK
 Content-Type: text/x-b
@@ -259,6 +282,7 @@ Content-Type: text/x-b
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/x-b|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == fixup-handler
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -268,6 +292,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=HANDLER|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
   log: [orx:error]      1 *-* static
   log: [orx:error]        >>>   "STATIC"
   log: [orx:error]        +++   "RC(30)"
@@ -283,6 +308,7 @@ HTTP/1.1 200 OK
   phase: Type|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=default-handler|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == access-notes
 HTTP/1.1 200 OK
   body: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=
@@ -294,6 +320,7 @@ HTTP/1.1 200 OK
   phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=n1|env=e1|in=i1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
   phase: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=n1|env=e1|in=i1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=n1|env=e1|in=i1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == fixup-headers
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -306,6 +333,7 @@ X-Out-Fixup: x
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == access-hdr-403
 HTTP/1.1 403 Forbidden
 Content-Type: text/html; charset=iso-8859-1
@@ -318,6 +346,7 @@ X-Out-Access: x
   phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=403|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == fixup-status
 HTTP/1.1 203 Non-Authoritative Information
 Content-Type: text/plain
@@ -328,6 +357,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=203|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == hp-say
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -338,6 +368,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == hp-log
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -348,6 +379,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
   log: [orx:error] logged in HeaderParser
 == hp-syntax
 HTTP/1.1 500 Internal Server Error
@@ -358,6 +390,7 @@ Content-Type: text/html; charset=iso-8859-1
   phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
   phase: Trans|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
   log: [orx:error] oorexx-host: /var/www/oorexx-phases/prog/HeaderParser.rex: line 67: Error 41: Bad arithmetic conversion.: Nonnumeric value ("a") used in arithmetic operation.
 == fixup-syntax
 HTTP/1.1 500 Internal Server Error
@@ -370,6 +403,7 @@ Content-Type: text/html; charset=iso-8859-1
   phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
   log: [orx:error] oorexx-host: /var/www/oorexx-phases/prog/Fixup.rex: line 67: Error 41: Bad arithmetic conversion.: Nonnumeric value ("a") used in arithmetic operation.
 == log-syntax
 HTTP/1.1 200 OK
@@ -397,6 +431,7 @@ Content-Type: text/plain
   phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=/Content.rex:200:1|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=/Content.rex:200:1|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=/s.txt:200:1|back=1|main=(nil)
+  phase: NativeLog
 == fixup-redir
 HTTP/1.1 500 Internal Server Error
 Content-Type: text/html; charset=iso-8859-1
@@ -408,6 +443,7 @@ Content-Type: text/html; charset=iso-8859-1
   phase: HeaderParser|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
   log: [orx:error] oorexx-host: WWWInternal_Redirect is only available in the content phase
   log: [orx:error] oorexx-host: /var/www/oorexx-phases/prog/Fixup.rex: line 68: Error 40: Incorrect call to routine.: External routine "WWWINTERNAL_REDIRECT" failed.
 == fixup-args
@@ -421,6 +457,7 @@ HTTP/1.1 200 OK
   phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)|args=2|post=a=1&b=2
   phase: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)|args=0|post=
   phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == auth-none
 HTTP/1.1 401 Unauthorized
 Content-Type: text/html; charset=iso-8859-1
@@ -433,6 +470,7 @@ WWW-Authenticate: Basic realm="ph"
   phase: HeaderParser|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=401|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == auth-user
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -444,6 +482,7 @@ Content-Type: text/plain
   phase: Authen|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/plain|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/plain|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == auth-bad
 HTTP/1.1 401 Unauthorized
 Content-Type: text/html; charset=iso-8859-1
@@ -456,6 +495,7 @@ WWW-Authenticate: Basic realm="ph"
   phase: HeaderParser|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=alice|status=401|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
   log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/": Password Mismatch
   log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/": Password Mismatch
   log: [auth_basic:error] AH01617: user alice: authentication failure for "/auth/index.html": Password Mismatch
@@ -489,6 +529,7 @@ WWW-Authenticate: Basic realm="ph"
   phase: HeaderParser|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=401|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == authz-401
 HTTP/1.1 401 Unauthorized
 Content-Type: text/html; charset=iso-8859-1
@@ -501,6 +542,7 @@ WWW-Authenticate: Basic realm="ph"
   phase: HeaderParser|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=401|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == authz-ok-user
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -512,6 +554,7 @@ Content-Type: text/plain
   phase: Authen|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/plain|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/plain|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == authen-403
 HTTP/1.1 403 Forbidden
 Content-Type: text/html; charset=iso-8859-1
@@ -524,6 +567,7 @@ Content-Type: text/html; charset=iso-8859-1
   phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Authen|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=alice|status=403|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == authen-ok
 HTTP/1.1 401 Unauthorized
 Content-Type: text/html; charset=iso-8859-1
@@ -536,6 +580,7 @@ WWW-Authenticate: Basic realm="ph"
   phase: HeaderParser|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Access|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=401|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == authen-ok-user
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -547,17 +592,20 @@ Content-Type: text/plain
   phase: Authen|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/plain|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/auth/s.txt|file=/var/www/oorexx-phases/doc/auth/s.txt|handler=|ct=text/plain|user=alice|status=200|pi=|pt=/var/www/oorexx-phases/doc/auth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/auth/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == forced
 HTTP/1.1 200 OK
   body: Forced|main=1|uri=/forced/Content.rex|file=/var/www/oorexx-phases/doc/forced/Content.rex|handler=rex
   phase: PostReadRequest|main=1|uri=/forced/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/forced/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
   phase: Trans|main=1|uri=/forced/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/forced/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == forced-static
 HTTP/1.1 200 OK
 Content-Type: text/plain
   body: f
   phase: PostReadRequest|main=1|uri=/forced/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/forced/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
   phase: Trans|main=1|uri=/forced/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/forced/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == head
 HTTP/1.1 200 OK
 Content-Type: text/html
@@ -571,6 +619,7 @@ Content-Type: text/html
   phase: Type|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=text/html|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == cauth-none
 HTTP/1.1 500 Internal Server Error
 Content-Type: text/html; charset=iso-8859-1
@@ -583,6 +632,7 @@ Content-Type: text/html; charset=iso-8859-1
   phase: Access|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Authz|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
@@ -622,6 +672,7 @@ Content-Type: text/html; charset=iso-8859-1
   phase: Access|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Authz|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
@@ -661,6 +712,7 @@ Content-Type: text/html; charset=iso-8859-1
   phase: Access|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Authz|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
@@ -700,6 +752,7 @@ Content-Type: text/html; charset=iso-8859-1
   phase: Access|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Authz|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=401|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
@@ -738,6 +791,7 @@ Content-Type: text/html; charset=iso-8859-1
   phase: Access|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Authz|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/cauth/s.txt|file=/var/www/oorexx-phases/doc/cauth/s.txt|handler=|ct=text/html; charset=iso-8859-1|user=|status=500|pi=|pt=/var/www/oorexx-phases/doc/cauth/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/cauth/s.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
   log: [authn_core:error] AH01796: AuthType Rexx configured without corresponding module
@@ -773,6 +827,7 @@ Content-Type: text/html; charset=iso-8859-1
   body: <title>403 Forbidden</title>
   phase: PostReadRequest|main=1|uri=/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=|handler=|ct=text/html; charset=iso-8859-1|user=|status=403|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == postread-hin
 HTTP/1.1 200 OK
   body: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=
@@ -784,6 +839,7 @@ HTTP/1.1 200 OK
   phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=p1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
   phase: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=p1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=p1|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == trans-file
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -794,6 +850,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == trans-uri
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -804,6 +861,7 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/alt.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/alt.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt|prev=(nil)|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/alt.txt|file=/var/www/oorexx-phases/doc/alt.txt|handler=|ct=text/plain|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/alt.txt|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
 == nofix
 HTTP/1.1 500 Internal Server Error
 Content-Type: text/html; charset=iso-8859-1
@@ -812,6 +870,7 @@ Content-Type: text/html; charset=iso-8859-1
   body: <title>500 Internal Server Error</title>
   phase: PostReadRequest|main=1|uri=/nofix/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/nofix/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
   phase: Trans|main=1|uri=/nofix/s.txt|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/nofix/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
+  phase: NativeLog
   log: [orx:error] oorexx-host: none: line 0: Error 3: Failure during initialization.: Failure during initialization: Program "none" was not found.
 == p-errdoc-rex
 HTTP/1.1 404 Not Found
@@ -830,6 +889,7 @@ HTTP/1.1 404 Not Found
   phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=404|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=/err/missing:404:1|next=(nil)|main=(nil)
   phase: Content|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=404|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=/err/missing:404:1|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/err/missing|file=/var/www/oorexx-phases/doc/err/missing|handler=|ct=|user=|status=404|pi=|pt=/var/www/oorexx-phases/doc/err/|note=|env=|in=|stm=0|wfile=/var/www/oorexx-phases/doc/err/missing|prev=(nil)|next=/Content.rex:404:1|back=1|main=(nil)
+  phase: NativeLog
 == p-errdoc-wprev
 HTTP/1.1 404 Not Found
 Content-Type: text/html; charset=iso-8859-1
@@ -849,6 +909,7 @@ Content-Type: text/html; charset=iso-8859-1
   phase: Type|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=404|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=/err/missing:404:1|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=HANDLER|ct=|user=|status=404|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=/err/missing:404:1|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/err/missing|file=/var/www/oorexx-phases/doc/err/missing|handler=|ct=text/html; charset=iso-8859-1|user=|status=404|pi=|pt=/var/www/oorexx-phases/doc/err/|note=|env=|in=|stm=0|wfile=/var/www/oorexx-phases/doc/err/missing|prev=(nil)|next=/Content.rex:500:1|back=1|main=(nil)
+  phase: NativeLog
   log: [orx:error] oorexx-host: /var/www/oorexx-phases/doc/Content.rex: line 69: Error 40: Incorrect call to routine.: External routine "WWWREQRECURI" failed.
 == p-errdoc-static
 HTTP/1.1 404 Not Found
@@ -866,3 +927,4 @@ Content-Type: text/plain
   phase: Access|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=|user=|status=404|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=/err2/missing:404:1|next=(nil)|main=(nil)
   phase: Fixup|main=1|uri=/s.txt|file=/var/www/oorexx-phases/doc/s.txt|handler=|ct=text/plain|user=|status=404|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/s.txt|prev=/err2/missing:404:1|next=(nil)|main=(nil)
   phase: Log|main=1|uri=/err2/missing|file=/var/www/oorexx-phases/doc/err2/missing|handler=|ct=|user=|status=404|pi=|pt=/var/www/oorexx-phases/doc/err2/|note=|env=|in=|stm=0|wfile=/var/www/oorexx-phases/doc/err2/missing|prev=(nil)|next=/s.txt:404:1|back=1|main=(nil)
+  phase: NativeLog

@@ -12,13 +12,16 @@
 #                 functions not there yet, a POST that is not urlencoded
 #
 # Run after tests/rexxhttp-suite.sh, which leaves Apache configured with
-# mod_orx (any MPM). Runs as root. Leaves nothing behind.
+# mod_orx (any MPM), and after make install-modrexx: it loads the mod_rexx
+# layer for the run (before mod_orx with ORX_REXX_FIRST=1) and takes it out
+# again. Runs as root. Leaves nothing behind.
 #
 #   tests/modrexx.sh
 #
 # Copyright 2026 Josep Maria Blasco -- Apache License 2.0
 
 HERE=$(cd "$(dirname "$0")" && pwd)
+. "$HERE/modrexx/layer.sh"
 LAB=/var/www/html/modrexx
 CONF=/etc/apache2/conf-available/modrexx.conf
 LOG=/var/log/apache2/error.log
@@ -47,6 +50,7 @@ chmod -R a+rX "$LAB"
     echo "    Require all granted"
     echo "</Directory>"
 } > "$CONF"
+layer_on
 a2enconf modrexx >/dev/null
 apachectl -k graceful; sleep 2
 : > "$LOG"
@@ -128,6 +132,7 @@ check "nothing else in the error log" \
 
 echo "== Cleanup"
 a2disconf modrexx >/dev/null
+layer_off
 rm -f "$CONF"
 rm -rf "$LAB" "$TMP"
 apachectl -k graceful; sleep 1

@@ -16,7 +16,9 @@
 # compared with phases-rexx.expected.
 #
 # Run after tests/rexxhttp-suite.sh, which leaves Apache configured with
-# mod_orx (any MPM). mod_rexx must not be loaded: it defines the same
+# mod_orx (any MPM), and after make install-modrexx: it loads the mod_rexx
+# layer for the run (before mod_orx with ORX_REXX_FIRST=1) and takes it out
+# again. mod_rexx must not be loaded: it defines the same
 # Rexx* directives. Runs as root; listens on port 8091 for the run. Leaves
 # nothing behind.
 #
@@ -27,6 +29,7 @@
 
 [ "$1" = --update ] && UPDATE=1
 HERE=$(cd "$(dirname "$0")" && pwd)
+. "$HERE/modrexx/layer.sh"
 LAB=/var/www/oorexx-phases
 DOC=$LAB/doc
 PROG=$LAB/prog
@@ -46,6 +49,7 @@ vhost() {
     echo "    DocumentRoot $DOC"
     echo "    ${1}SetVar PHLOG $LOGS/$2.log"
     for ph in $PHASES; do echo "    ${1}${ph}Handler $PROG/$ph.rex"; done
+    echo "    OoRexxLogHook $PROG/NativeLog.rex"
     echo "    <Directory $DOC>"
     echo "        AddHandler $3 .rex"
     echo "        Require all granted"
@@ -80,6 +84,11 @@ echo "== Setup"
 mkdir -p "$DOC/auth" "$DOC/cauth" "$DOC/forced" "$DOC/nofix" "$DOC/err" "$DOC/err2" \
          "$PROG" "$LOGS"
 for ph in $PHASES Forced; do cp "$HERE/modrexx/phase.rex" "$PROG/$ph.rex"; done
+# A logging hook of the core's own (mod_orx), in the same phase as
+# RexxLogHandler: the layer's hooks run before the core's, so its line
+# comes after the mod_rexx program's one, whichever module is loaded first.
+printf "call lineout '%s', 'NativeLog'\ncall lineout '%s'\n" \
+       "$LOGS/8091.log" "$LOGS/8091.log" > "$PROG/NativeLog.rex"
 for d in "$DOC" "$DOC/auth" "$DOC/forced"; do cp "$HERE/modrexx/phase.rex" "$d/Content.rex"; done
 echo static > "$DOC/s.txt";       echo alt > "$DOC/alt.txt"
 echo x > "$DOC/u.zzz";            echo private > "$DOC/auth/s.txt"
@@ -89,6 +98,7 @@ htpasswd -bc "$PROG/users" alice secret 2>/dev/null
 touch "$LOGS/8091.log" "$LOGS/8092.log"
 chmod -R a+rX "$LAB"; chown -R www-data "$LOGS"
 vhost Rexx 8091 rexx-handler > "$CONF"
+layer_on
 a2enconf oorexx-phases >/dev/null
 apachectl -k graceful; sleep 2
 
@@ -108,6 +118,7 @@ done
 
 echo "== Cleanup"
 a2disconf oorexx-phases >/dev/null
+layer_off
 rm -f "$CONF"
 rm -rf "$LAB" "$TMP"
 apachectl -k graceful; sleep 1

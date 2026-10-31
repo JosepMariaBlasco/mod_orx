@@ -4,3 +4,8 @@ module/*.lo
 module/*.la
 module/*.slo
 module/*.o
+modrexx/.libs/
+modrexx/*.lo
+modrexx/*.la
+modrexx/*.slo
+modrexx/*.o
