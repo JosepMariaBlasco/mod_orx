@@ -4,7 +4,8 @@
 # the order of their names: orx_rexx.load comes after orx.load, so the
 # layer is loaded after mod_orx; with ORX_REXX_FIRST=1 it is loaded just
 # before it (as orx-rexx.load: "-" sorts before "."), which must work the
-# same, since its hooks name the core as their successor. Just before:
+# same, since its hooks name the core as their successor (but in Trans and
+# Type, where they name nothing, and the core's run early). Just before:
 # against the other modules, whose hooks it does not name, the order of
 # LoadModule decides, as it did for mod_rexx (in type_checker, loading it
 # before mod_mime would let it see every request untyped). The caller

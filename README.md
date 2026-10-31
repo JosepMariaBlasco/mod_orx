@@ -5,17 +5,19 @@ Rexx programs as CGI scripts without a fork per request, and Rexx code
 attached to the other phases of Apache's request cycle (authentication,
 authorization, logging...), which a CGI cannot reach.
 
-**Status: milestone 1.** The content handler `oorexx-cgi` works and passes
+**Status: beta.** The content handler `oorexx-cgi` works and passes
 the full [RexxHTTP](https://rexx.epbcn.com/rexxhttp/) HTTP test suite
 unchanged, in place of mod_cgid, under both the event and the prefork MPM.
 Apache starts, watches and restarts the host itself. Rexx programs can also
 authenticate users, authorize requests and log them, through Apache's own
-provider mechanisms. Large packages such as RexxHTTP's classes can be
+provider mechanisms, and run in every other phase of the request
+(`OoRexx<Phase>Hook`), where they talk to Apache with commands
+(`Address APACHE`). Large packages such as RexxHTTP's classes can be
 preloaded once per host process. Programs written for mod_rexx run
 unchanged, in every phase, with mod_rexx's own configuration, through an
-optional layer ([modrexx/README.md](modrexx/README.md)). The native program
-class in the other phases, and Windows, are still to come. Not for
-production yet.
+optional layer ([modrexx/README.md](modrexx/README.md)). mod_orx needs
+ooRexx 5.3.0, and stays in beta until 5.3.0 is released; Windows is still
+to come. Not for production yet.
 
 ## Design in one page
 
@@ -35,7 +37,10 @@ So mod_orx is two pieces:
 - **`oorexx-host`**, a pool of processes outside Apache. Each process
   serves one phase of one request at a time, in a **fresh interpreter
   instance** (about 0.2–0.5 ms), with all of the program's I/O redirected
-  to the connection. A watchdog halts a program that exceeds its deadline.
+  to the connection. Besides, each process keeps one instance alive, its
+  *anchor*, so that the interpreter does not start from scratch in every
+  phase; what it loads (the `APACHE` environment, preloaded packages) is
+  loaded once per process. A watchdog halts a program that exceeds its deadline.
   A process is recycled after a number of requests. If one dies, the
   others, and Apache, are not affected. The pool grows when no process is
   idle, up to a maximum, and shrinks back to its minimum when it has had
@@ -109,7 +114,8 @@ file type for Oryx, the internal product name of what became ooRexx.
 Requirements:
 
 - Apache 2.4 with `apxs` (Debian/Ubuntu: `apache2-dev`);
-- ooRexx 5.2.0 or later with its API headers;
+- ooRexx 5.3.0 (r13344 or later) with its API headers: the `APACHE`
+  environment of native programs is a `.CommandHandler`, new in 5.3.0;
 - a C and a C++ compiler.
 
 ```sh
@@ -145,8 +151,10 @@ OoRexxTimeout 60
 | `OoRexxProcesses min [max]` | `2 8` | Size of the host's pool. With a single number, the pool has a fixed size. |
 | `OoRexxMaxRequests n` | `1000` | Phases a host process serves before it is replaced (`0`: no limit). |
 | `OoRexxTimeout seconds` | `60` | Deadline of a phase; also valid per directory. A drained host gets the largest one, plus 10 seconds, before what is left is killed. |
+| `OoRexxQueueTimeout seconds` | `10` | How long a phase waits for a free host process when they are all busy. After that, a 503 (a logging hook is skipped), and a line in the error log. Also valid per directory. |
 | `OoRexxAuthnProgram path` | none | The program behind `AuthBasicProvider oorexx`. Per directory. |
 | `OoRexxLogHook path` \| `none` | none | A program to run in the logging phase. Per directory; `none` switches off an inherited one. |
+| `OoRexx<Phase>Hook path [args...]` \| `none` | none | A native program in that phase (see below): `PostReadRequest` and `Trans` in the server or a `<VirtualHost>`; `HeaderParser`, `Access`, `Authen`, `Type` and `Fixup` per directory too. |
 | `OoRexxPreload file...` | none | Rexx packages every host process loads once, when it starts (see below). May be repeated. |
 
 `OoRexxHost`, `OoRexxSocket`, `OoRexxProcesses`, `OoRexxMaxRequests` and
@@ -167,7 +175,10 @@ OoRexxPreload /srv/rexxhttp/HTTP.Request.cls /srv/rexxhttp/HTTP.Response.cls \
 ```
 
 For RexxHTTP this is most of the cost of a request: loading its four classes
-takes about 4.6 ms per instance, and 0.34 ms when they are preloaded. A
+takes about 4.6 ms per instance, and 0.34 ms when they are preloaded. (The
+anchor itself, which every host process now keeps even without
+`OoRexxPreload`, already makes a RexxHTTP page cheaper: from about 7.3 to
+about 4.0 ms on the suite's test page, sequential requests.) A
 RexxHTTP page served by `oorexx-cgi` went from about 190–270 to about 870
 requests per second (two cores, `ab -c 4`).
 
@@ -230,8 +241,115 @@ where it is not, a `0` is a plain 403. An authenticated user who is not
 authorized gets a 401, as with `Require user`, unless
 `AuthzSendForbiddenOnFailure` is on.
 
-Each phase runs in a fresh interpreter instance, like a CGI: about 1.4 ms
+Each phase runs in a fresh interpreter instance, like a CGI: about 2.3 ms
 per hook, measured on a static file with a hook that only returns `1`.
+These programs can also use `Address APACHE` (next section): the providers
+may change `ENV` and `NOTE`; the logging hook only reads, and its `STATUS`
+and `BYTES_SENT` are the final ones.
+
+### Native programs in every phase: `Address APACHE`
+
+```apache
+OoRexxTransHook /srv/rexx/trans.rex
+<Directory "/srv/www">
+    OoRexxFixupHook /srv/rexx/fixup.rex strict
+</Directory>
+<Location "/app/">
+    AuthType oorexx                    # authentication without a password:
+    AuthName app                       # a session cookie, a token...
+    OoRexxAuthenHook /srv/rexx/session.rex
+    Require valid-user
+</Location>
+```
+
+A native program gets the arguments of its directive (`Use Arg`) and the
+CGI environment, and talks to Apache with commands:
+
+```rexx
+-- OoRexxTransHook: what was under /old/ is served from /var/www/new/
+Address APACHE
+"GET URI"
+If uri~startsWith("/old/") Then Do
+  "SET REQUEST_FILENAME" "/var/www/new/"uri~substr(6)
+  "SET NOTE origin" uri
+  Return 1                          -- this translation is mine
+End
+Return                              -- someone else decides
+```
+
+| Command | Does |
+|---|---|
+| `GET field [INTO var]` | Sets a variable named after the field (`URI`), or `var`. |
+| `GET table key [INTO var]` | Sets `TABLE.KEY` (the key in uppercase), the same stem under the singular and the plural name (`HEADER_IN.` and `HEADERS_IN.`). With repeated entries, the last one. |
+| `SET field value` | Changes a field. The value is the rest of the line, as it is. |
+| `SET` \| `ADD` \| `UNSET table key [value]` | Replaces, adds or removes entries. |
+| `LIST table [key]` | `Name: value` lines (or the values of `key`), in order: to `Address APACHE "..." With Output Stem s.` (or `Using (array)`), or else to `.output`, which in a hook is the error log. |
+| `LOG level message` | A line in the error log at a `LogLevel` level (`emerg`...`debug`, `trace1`...`trace8`), filtered by `LogLevel orx:...`. |
+
+Fields take `mod_rewrite`'s names: `THE_REQUEST`, `REQUEST_METHOD`,
+`SERVER_PROTOCOL`, `HOSTNAME`, `UNPARSED_URI`, `URI`, `QUERY_STRING`,
+`REQUEST_FILENAME`, `PATH_INFO`, `HANDLER`, `CONTENT_TYPE`,
+`CONTENT_ENCODING`, `CONTENT_LANGUAGES`, `USER`, `AUTH_TYPE`, `STATUS`,
+`BYTES_SENT`, `REMOTE_ADDR`, `SERVER_NAME`, `SERVER_PORT`, and `PHASE`.
+(Not `REQUEST_URI`, which means two things in Apache.) Tables:
+`HEADER_IN`, `HEADER_OUT`, `ERR_HEADER_OUT`, `ENV`, `NOTE`. `PREV`, `NEXT`
+or `MAIN` before the thing go to a related request, read-only, and prefix the
+variable: `"GET PREV URI"` sets `PREV_URI`; `"GET PREV PREV URI"`,
+`PREV_PREV_URI`.
+
+`RC` is 0, or 1 when there is no such entry or related request (the
+variable is left without a value). A value Apache would not take (a control
+character in a header, a relative `REQUEST_FILENAME`) raises ERROR with
+`RC` 2. A misuse (an unknown command, a change the phase does not allow) is
+a SYNTAX error, 93.900, at the command itself.
+
+| Changes allowed in | `URI` | `QUERY_STRING` | `REQUEST_FILENAME`, `PATH_INFO` | `HANDLER`, `CONTENT_*` | `USER` | `HEADER_IN` | `HEADER_OUT`, `ERR_HEADER_OUT` | `ENV`, `NOTE` |
+|---|---|---|---|---|---|---|---|---|
+| PostReadRequest | yes | yes | | | | yes | yes | yes |
+| Trans | yes | yes | yes | | | | yes | yes |
+| HeaderParser | | | | | | yes | yes | yes |
+| Access | | | | | | | yes | yes |
+| Authen | | | | | yes | | yes | yes |
+| Type | | | | yes | | | yes | yes |
+| Fixup | | yes | yes | yes | | | yes | yes |
+| providers | | | | | | | | yes |
+| Log | | | | | | | | |
+
+What the program returns is the hook's answer:
+
+| Returns | Trans, Type, Authen (the first that decides) | PostReadRequest, HeaderParser, Access, Fixup (all run) |
+|---|---|---|
+| `1` | decided: the next modules do not run | go on |
+| nothing | someone else decides | go on |
+| `0` | 403 (Authen: 401) | 403 |
+| 300 to 599 | that status | that status |
+| anything else, an error, the timeout | 500, and a line in the error log | the same |
+
+The module checks that a `Trans` that returns `1` has set an absolute
+`REQUEST_FILENAME`, an `Authen` that returns `1` has set `USER`, and a 3xx
+has a `Location`. A status drops `HEADER_OUT` (Apache keeps only
+`ERR_HEADER_OUT`, and `Location`): what must survive it, a `Set-Cookie` in a
+302 say, goes in `ERR_HEADER_OUT`, and the module warns in the error log of
+each header lost. There is no internal redirect from a hook: in `Trans`,
+change `URI` or `REQUEST_FILENAME`; elsewhere, return a status and let an
+`ErrorDocument` take it.
+
+Where they run:
+
+- `Trans` runs early, as `mod_rewrite` does, right after it, and so before
+  `mod_alias`; `Type`, before `mod_mime`, so that it can decide every type.
+  (In these two phases the mod_rexx layer keeps mod_rexx's place, after
+  them; in the others, its handlers run before the native hooks.)
+- `OoRexxAuthenHook` runs only where `AuthType oorexx`. On `1`, `REMOTE_USER`
+  and `AUTH_TYPE` reach the content and the log, and `Require valid-user`,
+  `Require user` and `Require oorexx` work on top of it.
+- The hooks do not run in subrequests (a `DirectoryIndex` lookup, an
+  include, negotiation), except `Access` and `Authen`, which guard what a
+  subrequest reaches. They do run in internal redirects (an `ErrorDocument`),
+  where `PREV` is the request before; Apache itself skips the auth phases of
+  a redirect or a subrequest whose configuration is that of the request
+  before it, and takes its user.
+- They do not read the request body: `.input` is empty.
 
 ### Debugging the host
 
@@ -270,7 +388,14 @@ including errors, timeouts and the error log.
 preloaded package shares between phases and what a program's own package
 does not, a missing file, and a file that fails to load.
 
-The suite and these three tests run without the mod_rexx layer. Its own
+`tests/queue.sh` checks `OoRexxQueueTimeout` with every host process busy.
+`tests/apache.sh` checks `Address APACHE` in the providers and the logging
+hook; `tests/native-phases.sh`, the `OoRexx<Phase>Hook` hooks: the order of
+the phases, every kind of return value, what each phase may change, the
+module's checks, `Authen`, subrequests and internal redirects, the
+directives and `LOG`.
+
+The suite and these tests run without the mod_rexx layer. Its own
 tests, `tests/modrexx.sh` and `tests/modrexx-phases.sh`, load it for their
 run: see [modrexx/README.md](modrexx/README.md).
 

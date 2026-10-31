@@ -69,7 +69,8 @@ enum {
 enum { OORX_PHASE_CONTENT = 1, OORX_PHASE_AUTHN = 2, OORX_PHASE_AUTHZ = 3,
        OORX_PHASE_LOG = 4, OORX_PHASE_POST_READ = 5, OORX_PHASE_TRANSLATE = 6,
        OORX_PHASE_HEADER_PARSER = 7, OORX_PHASE_ACCESS = 8,
-       OORX_PHASE_TYPE = 9, OORX_PHASE_FIXUP = 10 };
+       OORX_PHASE_TYPE = 9, OORX_PHASE_FIXUP = 10,
+       OORX_PHASE_AUTHEN = 11 /* check_user_id, a program of its own (D7) */ };
 
 /* Program classes. CGI and NATIVE are the core's; MODREXX is served by    */
 /* the optional mod_rexx layer, through its plugin of the host.            */

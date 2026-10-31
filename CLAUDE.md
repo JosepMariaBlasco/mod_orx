@@ -21,7 +21,9 @@ the maintainer's private project state, not here; README.md summarises them.
   (measured). The watchdog uses the instance API (`Halt()`).
 - **Verification.** A change to the module or the host is green only if
   `tests/rexxhttp-suite.sh` passes the RexxHTTP suite with the same counts
-  as under mod_cgid, 0 failures, 0 errors, and an empty error.log.
+  as under mod_cgid, 0 failures, 0 errors, and an empty error.log. A change
+  to native programs (the hooks, `host/apache.rex`) needs `tests/apache.sh`
+  and `tests/native-phases.sh` green too, under event and prefork.
 - **The mod_rexx layer is optional** (`modrexx/`). The core knows nothing
   of mod_rexx; the layer uses only `include/mod_orx.h` and
   `include/orx_host_plugin.h`. A change that touches the core's interface

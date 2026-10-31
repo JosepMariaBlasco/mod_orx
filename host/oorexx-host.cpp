@@ -21,25 +21,29 @@
  *   - A child exits after --max-requests connections (the master replaces
  *     it): .environment is process-global and survives instances, so this
  *     bounds what a program can leak to later ones.
- *   - Phases: content (a CGI program), the hooks authn, authz and log (a
- *     native program), and whatever a plugin serves (--plugin; see
- *     orx_host_plugin.h): the optional mod_rexx layer runs programs written
- *     for mod_rexx in every phase.
- *     A hook program gets the CGI environment, its arguments (ARGS), and
- *     returns a value that the module reads as its verdict. Its output has
- *     no client to go to, so it goes to the error log, like .error.
+ *   - Phases: content (a CGI program), every other phase (a native program),
+ *     and whatever a plugin serves (--plugin; see orx_host_plugin.h): the
+ *     optional mod_rexx layer runs programs written for mod_rexx in every
+ *     phase.
+ *     A native program gets the CGI environment, its arguments (ARGS), and
+ *     the APACHE command environment (apache.rex) on the snapshot of the
+ *     request; it returns a value that the module reads as its verdict. Its
+ *     output has no client to go to, so it goes to the error log, like
+ *     .error.
  *   - A watchdog thread Halt()s the instance when the phase's deadline
  *     passes. It only ever uses the INSTANCE API: using a thread context
  *     from a thread other than its own aborts the process (measured).
  *
- *   - With --preload, every child keeps one instance alive (the ANCHOR) in
- *     which it has loaded the given packages once. While an instance lives,
- *     the interpreter does not reset between phases, and a program that
- *     ::Requires one of those packages finds it already loaded (measured:
- *     RexxHTTP's four classes, 4.6 ms -> 0.34 ms per phase). Only what the
- *     anchor loaded is shared; a program's own packages are still loaded
- *     afresh in every phase. A changed preloaded file is seen only by new
- *     processes (a restart of Apache, or recycling).
+ *   - Every child keeps one instance alive (the ANCHOR). While an instance
+ *     lives, the interpreter does not reset between phases (measured:
+ *     RexxHTTP's test page, 7.3 -> 4.0 ms). The anchor loads, once, the
+ *     APACHE environment (its class is held and used by every native phase)
+ *     and, with --preload, the given packages: a program that ::Requires one
+ *     of them finds it already loaded (measured: RexxHTTP's four classes,
+ *     4.6 ms -> 0.34 ms per phase). Only what the anchor loaded is shared; a
+ *     program's own packages are still loaded afresh in every phase. A
+ *     changed preloaded file is seen only by new processes (a restart of
+ *     Apache, or recycling).
  *
  *   - SIGTERM drains: no child accepts anything new, the children finish
  *     what they hold and what is queued, and the master exits; after
@@ -657,13 +661,12 @@ static void serve(int fd)
     int phase = b[1], klass = b[2];
     unsigned timeout = oorx_get_u32(b + 3);
     std::string program = begin.substr(7);
-    /* The content phase runs CGI programs; the hooks (authn, authz, log)   */
-    /* run native ones: arguments in, a verdict out. A class with a plugin  */
+    /* The content phase runs CGI programs; every other phase, native ones */
+    /* (arguments in, a verdict out, Address APACHE). A class with a plugin */
     /* is the plugin's, in the phases it accepts.                           */
     const orx_host_plugin *plugin = klass > 0 && klass < MAX_CLASSES ? g_plugin[klass] : NULL;
-    bool hook = klass == OORX_CLASS_NATIVE &&
-                (phase == OORX_PHASE_AUTHN || phase == OORX_PHASE_AUTHZ ||
-                 phase == OORX_PHASE_LOG);
+    bool hook = klass == OORX_CLASS_NATIVE && phase >= OORX_PHASE_AUTHN &&
+                phase <= OORX_PHASE_AUTHEN;
     if (!(phase == OORX_PHASE_CONTENT && klass == OORX_CLASS_CGI) && !hook && !plugin) {
         logf_conn("oorexx-host: phase/class not implemented yet for %s", program.c_str());
         send_result(501);
@@ -918,8 +921,9 @@ static bool load_plugin(const char *spec)
     return true;
 }
 
-/* The anchor: an instance that is never terminated, with the preloaded     */
-/* packages loaded in it by a program made of one ::Requires per file. It   */
+/* The anchor: an instance that is never terminated, with the APACHE        */
+/* environment, and the preloaded packages loaded in it by a program made   */
+/* of one ::Requires per file. It                                           */
 /* lives in the child's main thread, like every instance of the child, and  */
 /* the watchdog never sees it. A package that fails to load is a            */
 /* configuration error: the child exits with EXIT_CONFIG, and the master    */

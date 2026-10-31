@@ -24,6 +24,12 @@
  *       log    status, bytes, microsecs   (the value is ignored)
  *
  *     Any other value, or an error in the program, is a general error (500).
+ *   - Native programs in the other phases (OoRexx<Phase>Hook: PostReadRequest,
+ *     Trans, HeaderParser, Access, Authen with AuthType oorexx, Type, Fixup),
+ *     whose return value is the hook's answer (see native_hook). Every
+ *     native program, the ones above too, talks to Apache with commands,
+ *     Address APACHE (host/apache.rex), on a snapshot of the request; the
+ *     module allows each phase its own changes (native_allow).
  *   - What the other modules of mod_orx build on (mod_orx.h): a way to run
  *     one phase of a request in oorexx-host. The optional mod_rexx layer,
  *     mod_orx_rexx (modrexx/), runs programs written for mod_rexx with it,
@@ -46,6 +52,7 @@
  *                    OoRexxAuthnProgram /path/authn.rex
  *                    Require oorexx /path/authz.rex admins     </Location>
  *   OoRexxLogHook /path/log.rex
+ *   OoRexxTransHook /path/trans.rex [arguments...]   # and the other phases
  */
 
 #include "httpd.h"
@@ -114,6 +121,10 @@ typedef struct {
     int         queue_timeout;  /* OoRexxQueueTimeout; -1 = unset        */
     const char *authn_program;  /* OoRexxAuthnProgram; NULL = unset      */
     const char *log_hook;       /* OoRexxLogHook; NULL = unset, "" = off */
+    /* OoRexx<Phase>Hook, by phase number: the program (NULL = unset,      */
+    /* "" = none) and its arguments.                                        */
+    const char *hook[OORX_PHASE_AUTHEN + 1];
+    apr_array_header_t *hook_args[OORX_PHASE_AUTHEN + 1];
 } oorx_dir_cfg;
 
 static void *create_dir_cfg(apr_pool_t *p, char *dir)
@@ -132,6 +143,14 @@ static void *merge_dir_cfg(apr_pool_t *p, void *basev, void *addv)
     c->queue_timeout = add->queue_timeout >= 0 ? add->queue_timeout : base->queue_timeout;
     c->authn_program = add->authn_program ? add->authn_program : base->authn_program;
     c->log_hook = add->log_hook ? add->log_hook : base->log_hook;
+    {
+        int i;
+        for (i = 0; i <= OORX_PHASE_AUTHEN; i++) {
+            int a = add->hook[i] != NULL;
+            c->hook[i] = a ? add->hook[i] : base->hook[i];
+            c->hook_args[i] = a ? add->hook_args[i] : base->hook_args[i];
+        }
+    }
     return c;
 }
 
@@ -151,6 +170,37 @@ static const char *set_log_hook(cmd_parms *cmd, void *dcfg, const char *arg)
     oorx_dir_cfg *c = dcfg;
     if (!strcasecmp(arg, "none")) { c->log_hook = ""; return NULL; }
     return set_program(cmd, dcfg, arg);
+}
+
+/* OoRexx<Phase>Hook program [arguments...] | none. The phase is cmd->info.  */
+/* PostReadRequest and Trans run before Apache walks its sections, so they  */
+/* are refused inside one rather than accepted and never run.              */
+static const char *set_hook(cmd_parms *cmd, void *dcfg, const char *line)
+{
+    oorx_dir_cfg *c = dcfg;
+    int phase = (int)(apr_uintptr_t)cmd->info;
+    const char *prog;
+    if (phase == OORX_PHASE_POST_READ || phase == OORX_PHASE_TRANSLATE) {
+        const char *err = ap_check_cmd_context(cmd, NOT_IN_DIR_CONTEXT);
+        if (err) return err;
+    }
+    prog = ap_getword_conf(cmd->pool, &line);
+    if (!*prog) return apr_pstrcat(cmd->pool, cmd->cmd->name, ": the program is missing", NULL);
+    c->hook_args[phase] = apr_array_make(cmd->pool, 2, sizeof(const char *));
+    if (!strcasecmp(prog, "none")) {
+        if (*line) return apr_pstrcat(cmd->pool, cmd->cmd->name, " none takes no arguments", NULL);
+        c->hook[phase] = "";
+        return NULL;
+    }
+    c->hook[phase] = ap_server_root_relative(cmd->pool, prog);
+    if (!c->hook[phase])
+        return apr_pstrcat(cmd->pool, cmd->cmd->name, ": invalid path: ", prog, NULL);
+    while (*line) {
+        const char *w = ap_getword_conf(cmd->pool, &line);
+        if (*w) *(const char **)apr_array_push(c->hook_args[phase]) = w;
+        else break;
+    }
+    return NULL;
 }
 
 static const char *set_socket(cmd_parms *cmd, void *dummy, const char *arg)
@@ -271,6 +321,24 @@ static const command_rec oorx_cmds[] = {
                   "The Rexx program behind \"AuthBasicProvider oorexx\""),
     AP_INIT_TAKE1("OoRexxLogHook", set_log_hook, NULL, RSRC_CONF | ACCESS_CONF,
                   "A Rexx program to run in the logging phase, or \"none\""),
+    AP_INIT_RAW_ARGS("OoRexxPostReadRequestHook", set_hook, (void *)OORX_PHASE_POST_READ,
+                     RSRC_CONF, "A Rexx program [arguments] for post_read_request, or none"),
+    AP_INIT_RAW_ARGS("OoRexxTransHook", set_hook, (void *)OORX_PHASE_TRANSLATE,
+                     RSRC_CONF, "A Rexx program [arguments] for translate_name, or none"),
+    AP_INIT_RAW_ARGS("OoRexxHeaderParserHook", set_hook, (void *)OORX_PHASE_HEADER_PARSER,
+                     RSRC_CONF | ACCESS_CONF,
+                     "A Rexx program [arguments] for header_parser, or none"),
+    AP_INIT_RAW_ARGS("OoRexxAccessHook", set_hook, (void *)OORX_PHASE_ACCESS,
+                     RSRC_CONF | ACCESS_CONF,
+                     "A Rexx program [arguments] for access_checker, or none"),
+    AP_INIT_RAW_ARGS("OoRexxAuthenHook", set_hook, (void *)OORX_PHASE_AUTHEN,
+                     RSRC_CONF | ACCESS_CONF,
+                     "A Rexx program [arguments] for check_user_id, with AuthType oorexx, or none"),
+    AP_INIT_RAW_ARGS("OoRexxTypeHook", set_hook, (void *)OORX_PHASE_TYPE,
+                     RSRC_CONF | ACCESS_CONF,
+                     "A Rexx program [arguments] for type_checker, or none"),
+    AP_INIT_RAW_ARGS("OoRexxFixupHook", set_hook, (void *)OORX_PHASE_FIXUP,
+                     RSRC_CONF | ACCESS_CONF, "A Rexx program [arguments] for fixups, or none"),
     {NULL}
 };
 
@@ -702,8 +770,9 @@ static int pump(oorx_conn *c)
             char *m = apr_palloc(c->r->pool, len + 1);
             if (len && oorx_read_all(c->fd, m, len) < 0) { c->failed = 1; break; }
             m[len] = '\0';
-            /* The level is the number of an APLOG_* level.                 */
-            ap_log_rerror(APLOG_MARK, len && (unsigned char)m[0] <= APLOG_DEBUG ? m[0] : APLOG_ERR,
+            /* The level is the number of an APLOG_* level, trace8 the last; */
+            /* as this module's, so that "LogLevel orx:..." filters them.   */
+            ap_log_rerror(APLOG_MARK, len && (unsigned char)m[0] <= APLOG_TRACE8 ? m[0] : APLOG_ERR,
                           0, c->r, "%s", len ? m + 1 : "");
             break;
         }
@@ -1221,18 +1290,41 @@ static int oorx_cgi_handler(request_rec *r)
 /* is what the program returned, or NULL if it returned nothing.            */
 /* The core operations a native program may send in each phase: what the   */
 /* APACHE environment allows (host/apache.rex), checked again here.         */
+static apr_uint32_t ops_mask(const char *ops)
+{
+    apr_uint32_t m = 0;
+    char op[3];
+    while (*ops) {
+        int n = 0;
+        while (*ops == ' ') ops++;
+        while (*ops && *ops != ' ' && n < 2) op[n++] = *ops++;
+        op[n] = '\0';
+        if (n && oorx_op_index(op) >= 0) m |= 1u << oorx_op_index(op);
+    }
+    return m;
+}
+
 static apr_uint32_t native_allow(int phase)
 {
-    static const char *const env_notes[] = { "se", "ae", "ue", "sn", "an", "un", NULL };
-    apr_uint32_t m = 0;
-    int i;
+    /* ENV and NOTE; and the headers going out, in the hooks.               */
+    static const char *const env_notes = "se ae ue sn an un";
+    static const char *const out = "so ao uo sx ax ux";
     switch (phase) {
     case OORX_PHASE_AUTHN:
-    case OORX_PHASE_AUTHZ:
-        for (i = 0; env_notes[i]; i++) m |= 1u << oorx_op_index(env_notes[i]);
-        return m;
-    default:                                  /* LOG: nothing               */
-        return 0;
+    case OORX_PHASE_AUTHZ:         return ops_mask(env_notes);
+    case OORX_PHASE_POST_READ:     return ops_mask(env_notes) | ops_mask(out) |
+                                          ops_mask("U Q si ai ui");
+    case OORX_PHASE_TRANSLATE:     return ops_mask(env_notes) | ops_mask(out) |
+                                          ops_mask("U Q F P");
+    case OORX_PHASE_HEADER_PARSER: return ops_mask(env_notes) | ops_mask(out) |
+                                          ops_mask("si ai ui");
+    case OORX_PHASE_ACCESS:        return ops_mask(env_notes) | ops_mask(out);
+    case OORX_PHASE_AUTHEN:        return ops_mask(env_notes) | ops_mask(out) | ops_mask("R");
+    case OORX_PHASE_TYPE:          return ops_mask(env_notes) | ops_mask(out) |
+                                          ops_mask("H T E K");
+    case OORX_PHASE_FIXUP:         return ops_mask(env_notes) | ops_mask(out) |
+                                          ops_mask("Q F P H T E K");
+    default:                       return 0;    /* LOG: nothing             */
     }
 }
 
@@ -1362,8 +1454,141 @@ static int oorx_log_transaction(request_rec *r)
     return DECLINED;                               /* other loggers run too */
 }
 
+/* ------------------------------------------------------------------------ */
+/* The hooks of native programs: OoRexx<Phase>Hook                          */
+/*                                                                          */
+/* A program gets its arguments and talks to Apache through Address APACHE; */
+/* what it returns is the hook's answer:                                    */
+/*                                                                          */
+/*   1          OK: in Trans and Type, this phase is decided (the next      */
+/*              modules do not run); in the others, go on. Trans must have  */
+/*              set an absolute REQUEST_FILENAME; Authen, USER.             */
+/*   no value   DECLINED: someone else decides                             */
+/*   0          403 (Authen: 401)                                           */
+/*   300..599   that status (a 3xx needs a Location)                        */
+/*   anything else, an error, the timeout: 500, and a line in the log       */
+/*                                                                          */
+/* They decline in subrequests: a phase of Rexx in every lookup of          */
+/* DirectoryIndex, negotiation or an include would be dear, and a LOOKUP    */
+/* would deadlock. Not Access and Authen, which, like the providers, guard  */
+/* what a subrequest reaches (an include of a protected file, say).         */
+/* Internal redirects are not subrequests: there they all run.              */
+/* ------------------------------------------------------------------------ */
+
+static const char *phase_directive(int phase)
+{
+    switch (phase) {
+    case OORX_PHASE_POST_READ:     return "OoRexxPostReadRequestHook";
+    case OORX_PHASE_TRANSLATE:     return "OoRexxTransHook";
+    case OORX_PHASE_HEADER_PARSER: return "OoRexxHeaderParserHook";
+    case OORX_PHASE_ACCESS:        return "OoRexxAccessHook";
+    case OORX_PHASE_AUTHEN:        return "OoRexxAuthenHook";
+    case OORX_PHASE_TYPE:          return "OoRexxTypeHook";
+    case OORX_PHASE_FIXUP:         return "OoRexxFixupHook";
+    }
+    return "?";
+}
+
+/* A status drops headers_out (Apache keeps err_headers_out, and rescues    */
+/* only Location): say so for each entry lost (D5).                          */
+typedef struct { request_rec *r; const char *program; int status; } dropped_ctx;
+
+static int warn_dropped(void *data, const char *key, const char *value)
+{
+    dropped_ctx *d = data;
+    (void)value;
+    if (strcasecmp(key, "Location"))
+        ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, d->r,
+                      "mod_orx: %s returned status %d: HEADER_OUT %s is lost "
+                      "(ERR_HEADER_OUT is what survives a status)",
+                      d->program, d->status, key);
+    return 1;
+}
+
+static int hook_status(request_rec *r, const char *program, int status)
+{
+    dropped_ctx d;
+    d.r = r; d.program = program; d.status = status;
+    apr_table_do(warn_dropped, &d, r->headers_out, NULL);
+    return status;
+}
+
+static int native_hook(request_rec *r, int phase)
+{
+    oorx_dir_cfg *dcfg = ap_get_module_config(r->per_dir_config, &orx_module);
+    const char *program = dcfg->hook[phase], *value;
+    apr_array_header_t *args = dcfg->hook_args[phase];
+    int status;
+    char *end;
+    long n;
+
+    if (!program || !*program) return DECLINED;
+    if (r->main && phase != OORX_PHASE_ACCESS && phase != OORX_PHASE_AUTHEN) return DECLINED;
+    status = run_hook(r, phase, program, args ? (const char **)args->elts : NULL,
+                      args ? args->nelts : 0, &value);
+    if (status != 0) return HTTP_INTERNAL_SERVER_ERROR;   /* logged already */
+    if (!value) return DECLINED;
+    if (!strcmp(value, "1")) {
+        if (phase == OORX_PHASE_TRANSLATE && (!r->filename || r->filename[0] != '/')) {
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                          "mod_orx: %s returned 1 without an absolute REQUEST_FILENAME",
+                          program);
+            return HTTP_INTERNAL_SERVER_ERROR;
+        }
+        if (phase == OORX_PHASE_AUTHEN && (!r->user || !*r->user)) {
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                          "mod_orx: %s returned 1 without setting USER", program);
+            return HTTP_INTERNAL_SERVER_ERROR;
+        }
+        return OK;
+    }
+    if (!strcmp(value, "0"))
+        return hook_status(r, program, phase == OORX_PHASE_AUTHEN ? HTTP_UNAUTHORIZED
+                                                                  : HTTP_FORBIDDEN);
+    n = strtol(value, &end, 10);
+    if (*value && !*end && n >= 300 && n <= 599) {
+        if (n < 400 && !apr_table_get(r->headers_out, "Location") &&
+            !apr_table_get(r->err_headers_out, "Location")) {
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                          "mod_orx: %s returned %ld without a Location", program, n);
+            return HTTP_INTERNAL_SERVER_ERROR;
+        }
+        return hook_status(r, program, (int)n);
+    }
+    ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                  "mod_orx: %s (%s) returned \"%s\"; expected 1, 0, no value or a "
+                  "status from 300 to 599", program, phase_directive(phase), value);
+    return HTTP_INTERNAL_SERVER_ERROR;
+}
+
+static int oorx_post_read(request_rec *r)     { return native_hook(r, OORX_PHASE_POST_READ); }
+static int oorx_translate(request_rec *r)     { return native_hook(r, OORX_PHASE_TRANSLATE); }
+static int oorx_header_parser(request_rec *r) { return native_hook(r, OORX_PHASE_HEADER_PARSER); }
+static int oorx_access(request_rec *r)        { return native_hook(r, OORX_PHASE_ACCESS); }
+static int oorx_type(request_rec *r)          { return native_hook(r, OORX_PHASE_TYPE); }
+static int oorx_fixup(request_rec *r)         { return native_hook(r, OORX_PHASE_FIXUP); }
+
+/* Authen: only where AuthType is oorexx, so that it never competes with     */
+/* Basic or Digest (D7).                                                     */
+static int oorx_authen(request_rec *r)
+{
+    const char *type = ap_auth_type(r);
+    int ret;
+    if (!type || strcasecmp(type, "oorexx")) return DECLINED;
+    ret = native_hook(r, OORX_PHASE_AUTHEN);
+    /* Authenticated: say how, as mod_auth_basic does (AUTH_TYPE).          */
+    if (ret == OK) r->ap_auth_type = (char *)type;
+    return ret;
+}
+
 static void register_hooks(apr_pool_t *p)
 {
+    /* Trans early, as mod_rewrite is, and right after it: before mod_alias  */
+    /* and the other translators. Type before mod_mime, which would         */
+    /* otherwise decide every known extension first. (The mod_rexx layer   */
+    /* names neither, and keeps mod_rexx's place, after them.)              */
+    static const char *const after_rewrite[] = { "mod_rewrite.c", NULL };
+    static const char *const before_type[] = { "mod_mime.c", NULL };
     /* What the other modules of mod_orx build on (mod_orx.h).              */
     APR_REGISTER_OPTIONAL_FN(orx_abi);
     APR_REGISTER_OPTIONAL_FN(orx_vars_new);
@@ -1380,6 +1605,15 @@ static void register_hooks(apr_pool_t *p)
     ap_hook_child_init(oorx_child_init, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_handler(oorx_cgi_handler, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_log_transaction(oorx_log_transaction, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_post_read_request(oorx_post_read, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_translate_name(oorx_translate, after_rewrite, NULL, APR_HOOK_FIRST);
+    ap_hook_header_parser(oorx_header_parser, NULL, NULL, APR_HOOK_MIDDLE);
+    /* PER_URI: a program may look at anything, not only at the            */
+    /* configuration, so it runs again after an internal redirect.         */
+    ap_hook_check_access(oorx_access, NULL, NULL, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_URI);
+    ap_hook_check_authn(oorx_authen, NULL, NULL, APR_HOOK_MIDDLE, AP_AUTH_INTERNAL_PER_URI);
+    ap_hook_type_checker(oorx_type, NULL, before_type, APR_HOOK_MIDDLE);
+    ap_hook_fixups(oorx_fixup, NULL, NULL, APR_HOOK_MIDDLE);
     ap_register_auth_provider(p, AUTHN_PROVIDER_GROUP, "oorexx", AUTHN_PROVIDER_VERSION,
                               &oorx_authn_provider, AP_AUTH_INTERNAL_PER_CONF);
     ap_register_auth_provider(p, AUTHZ_PROVIDER_GROUP, "oorexx", AUTHZ_PROVIDER_VERSION,

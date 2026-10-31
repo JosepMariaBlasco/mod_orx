@@ -22,8 +22,12 @@
  * at startup) provides the WWW* variables and functions. mod_rexx itself
  * cannot be loaded with it: they define the same directives.
  *
- * Its hooks run before the core's in every phase: they name "mod_orx.c" as
- * their successor (without its directory: Apache strips it; measured).
+ * Its hooks run before the core's in every phase but two: they name
+ * "mod_orx.c" as their successor (without its directory: Apache strips it;
+ * measured). In translate_name and type_checker they name nothing, and keep
+ * mod_rexx's place, which the order of LoadModule decides (after mod_alias
+ * and mod_mime, as a rule): the core's native hooks there run early, before
+ * mod_alias and mod_mime, and naming the core would drag these along.
  */
 
 #include "httpd.h"
@@ -430,7 +434,8 @@ static int rx_post_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptemp
 
 static void register_hooks(apr_pool_t *p)
 {
-    /* Before the core's own hooks, in every phase (see the top).           */
+    /* Before the core's own hooks, in every phase but Trans and Type (see   */
+    /* the top).                                                             */
     static const char *const core[] = { "mod_orx.c", NULL };
     (void)p;
     ap_hook_optional_fn_retrieve(retrieve, NULL, NULL, APR_HOOK_MIDDLE);
@@ -439,12 +444,12 @@ static void register_hooks(apr_pool_t *p)
     /* At mod_rexx's positions: RexxAuthenHandler runs in auth_checker and  */
     /* RexxAuthzHandler in check_user_id, as under mod_rexx.                */
     ap_hook_post_read_request(rx_post_read, NULL, core, APR_HOOK_MIDDLE);
-    ap_hook_translate_name(rx_translate, NULL, core, APR_HOOK_MIDDLE);
+    ap_hook_translate_name(rx_translate, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_header_parser(rx_header_parser, NULL, core, APR_HOOK_MIDDLE);
     ap_hook_access_checker(rx_access, NULL, core, APR_HOOK_MIDDLE);
     ap_hook_check_user_id(rx_authz, NULL, core, APR_HOOK_MIDDLE);
     ap_hook_auth_checker(rx_authen, NULL, core, APR_HOOK_MIDDLE);
-    ap_hook_type_checker(rx_type, NULL, core, APR_HOOK_MIDDLE);
+    ap_hook_type_checker(rx_type, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_fixups(rx_fixup, NULL, core, APR_HOOK_MIDDLE);
     ap_hook_log_transaction(rx_log, NULL, core, APR_HOOK_MIDDLE);
 }
