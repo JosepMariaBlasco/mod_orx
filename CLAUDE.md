@@ -22,3 +22,9 @@ the maintainer's private project state, not here; README.md summarises them.
 - **Verification.** A change to the module or the host is green only if
   `tests/rexxhttp-suite.sh` passes the RexxHTTP suite with the same counts
   as under mod_cgid, 0 failures, 0 errors, and an empty error.log.
+- **The mod_rexx layer is optional** (`modrexx/`). The core knows nothing
+  of mod_rexx; the layer uses only `include/mod_orx.h` and
+  `include/orx_host_plugin.h`. A change that touches the core's interface
+  is green only if, besides the above, `tests/modrexx.sh` and
+  `tests/modrexx-phases.sh` pass with the layer loaded after mod_orx and,
+  with `ORX_REXX_FIRST=1`, before it.

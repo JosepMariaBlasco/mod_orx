@@ -12,9 +12,10 @@ Apache starts, watches and restarts the host itself. Rexx programs can also
 authenticate users, authorize requests and log them, through Apache's own
 provider mechanisms. Large packages such as RexxHTTP's classes can be
 preloaded once per host process. Programs written for mod_rexx run
-unchanged, in every phase, with mod_rexx's own configuration (see below).
-The native program class in the other phases, and Windows, are still to
-come. Not for production yet.
+unchanged, in every phase, with mod_rexx's own configuration, through an
+optional layer ([modrexx/README.md](modrexx/README.md)). The native program
+class in the other phases, and Windows, are still to come. Not for
+production yet.
 
 ## Design in one page
 
@@ -58,7 +59,25 @@ nothing of the old host may call into the module afterwards, not even to be
 reaped (an upgraded module would crash Apache's parent).
 
 The protocol is a small binary framing (type, flags, length, payload), one
-connection per phase, with the protocol version in the first frame.
+connection per phase, with the protocol version in the first frame
+(`include/oorexx_protocol.h`).
+
+Everything else is built on the core, through two interfaces internal to
+mod_orx (they are versioned, and must match exactly; nothing is promised to
+third parties):
+
+- `include/mod_orx.h`: what the core offers to the other Apache modules of
+  mod_orx, as APR optional functions: build what is sent to the host (the
+  CGI environment, and a snapshot of the request), run a phase, send its
+  output to the client or nowhere, allow some changes to the request and
+  not others.
+- `include/orx_host_plugin.h`: what `oorexx-host` offers to a plugin that
+  serves a class of program (`--plugin`): read the snapshot, change the
+  request, and set the policy of the interpreter instance.
+
+The mod_rexx layer is the first such client: the module `mod_orx_rexx.so`
+and the plugin `orx_rexx_plugin.so`, in `modrexx/`. A site that does not
+load it sees nothing of mod_rexx.
 
 For `oorexx-cgi`, the module behaves like mod_cgi:
 
@@ -98,6 +117,14 @@ make
 sudo make install            # APXS=... OOREXX_PREFIX=... if needed
 ```
 
+Only for programs written for mod_rexx, the optional layer
+([modrexx/README.md](modrexx/README.md)):
+
+```sh
+make modrexx
+sudo make install-modrexx    # PLUGINDIR=... too, if needed
+```
+
 ## Configuring
 
 ```apache
@@ -121,10 +148,6 @@ OoRexxTimeout 60
 | `OoRexxAuthnProgram path` | none | The program behind `AuthBasicProvider oorexx`. Per directory. |
 | `OoRexxLogHook path` \| `none` | none | A program to run in the logging phase. Per directory; `none` switches off an inherited one. |
 | `OoRexxPreload file...` | none | Rexx packages every host process loads once, when it starts (see below). May be repeated. |
-| `OoRexxSetVar name value` | none | A variable more for every program of the `OoRexx*` set (see *Programs written for mod_rexx*), like mod_rexx's `RexxSetVar`. Per directory, also in `.htaccess`; the outer ones are inherited. |
-| `OoRexxHandler path` \| `none` | none | The program `oorexx-modrexx` runs instead of the requested file, like mod_rexx's `RexxHandler`. Per directory, also in `.htaccess`. |
-| `OoRexx<Phase>Handler path` \| `none` | none | A program written for mod_rexx for that phase: `PostReadRequest`, `Trans`, `HeaderParser`, `Access`, `Authen`, `Authz`, `Type`, `Fixup`, `Log` (see below). Per directory, also in `.htaccess`; `none` switches off an inherited one. |
-| `Rexx*` | | mod_rexx's own directives, with its meaning (see below). |
 
 `OoRexxHost`, `OoRexxSocket`, `OoRexxProcesses`, `OoRexxMaxRequests` and
 `OoRexxPreload` are global: they cannot appear inside `<VirtualHost>`.
@@ -210,115 +233,7 @@ authorized gets a 401, as with `Require user`, unless
 Each phase runs in a fresh interpreter instance, like a CGI: about 1.4 ms
 per hook, measured on a static file with a hook that only returns `1`.
 
-### Programs written for mod_rexx
-
-[mod_rexx](https://sourceforge.net/projects/modrexx/) programs run
-unchanged: they get their request in `arg(1)`, the `WWW*` variables exist
-before their first line, the `WWW*` functions are there without being
-declared, and what they return is the phase's status (`0` OK, `-1`
-declined, `-2` done, or an HTTP status). Their own `Apache.cls` keeps
-working, since it only calls those functions.
-
-There are two sets of directives for them. The first is **mod_rexx's
-own**, with its meaning: a configuration written for mod_rexx works as it
-is, and the only line to change is the `LoadModule`. (So mod_rexx and
-mod_orx cannot be loaded in the same Apache.)
-
-```apache
-LoadModule orx_module modules/mod_orx.so     # instead of mod_rexx.so
-RexxSetVar SITE "My site"
-RexxFixupHandler /srv/rexx/fixup.rex
-<Directory "/var/www/html/rexx">
-    AddHandler rexx-handler .rex
-</Directory>
-```
-
-The second, **mod_orx's**, has the same names with `Oo` in front, and the
-handler `oorexx-modrexx`. Its directives mean what their names say, and
-behave as Apache's do; mod_rexx's had three oddities, which its set keeps:
-
-| | `Rexx*` (mod_rexx's) | `OoRexx*` (mod_orx's) |
-|---|---|---|
-| Content | `AddHandler rexx-handler` (or `rexx_handler`, `application/x-httpd-rexx-script`), `RexxHandler` | `AddHandler oorexx-modrexx`, `OoRexxHandler` |
-| Phases | `RexxPostReadRequestHandler`, `RexxTransHandler`, `RexxHeaderParserHandler`, `RexxAccessHandler`, `RexxAuthenHandler`, `RexxAuthzHandler`, `RexxTypeHandler`, `RexxFixupHandler`, `RexxLogHandler` | the same, with `OoRexx` |
-| Variables | `RexxSetVar` | `OoRexxSetVar` |
-| Authentication and authorization | crossed: `RexxAuthenHandler` runs in authorization (`auth_checker`), `RexxAuthzHandler` in authentication (`check_user_id`) | `OoRexxAuthenHandler` in authentication, `OoRexxAuthzHandler` in authorization |
-| Inner sections | a section with any `Rexx*` directive replaces all the `Rexx*` ones around it (nothing is inherited) | inherit what they do not set; `none` switches a program off |
-| Program paths | as written | relative to `ServerRoot` |
-
-A program of each set sees only the variables of its own set. Both sets
-can be used side by side; in the same hook, the `Rexx*` program runs first.
-`RexxRspCompiler` and `RexxTempFileNameTemplate` (RSP pages) are not
-supported, and a configuration that has them does not start.
-
-Under Apache 2.4 the crossing matters. With `AuthType Basic`, Apache's
-own module takes the authentication phase, so a program there never runs
-(`RexxAuthzHandler`, `OoRexxAuthenHandler`); and since no `WWW*` function
-sets the user, a program in that phase can only refuse. The program that
-can decide on a known user is the one in the authorization phase
-(`RexxAuthenHandler`, `OoRexxAuthzHandler`).
-
-Outside the content phase, as under mod_rexx, nothing runs in a
-subrequest, what the program says goes nowhere, and an error in it is a
-500 with the error in the error log. The request body is read only if the
-program asks for it (`WWWGetArgs` on a POST, say), and is then gone for the
-content handler, as under mod_rexx.
-
-Every variable and function behaves as under mod_rexx 2.4.0, its last
-version, measured on the same programs and the same configuration under
-both (`tests/modrexx.sh`, `tests/modrexx-phases.sh`), down to its
-oddities: a variable is set with its name exactly as written, so that a
-form field `user` is `WWWARGS.user` (found with `k = 'user'; say
-wwwargs.k`) and a `SetVar` name in lowercase is not visible to the
-program; Apache holds a small response until the end, so that a status
-returned after some output still replaces it; a `HEAD` request is answered
-without running the program. The program runs in `/`, and a command goes
-to the environment `WWW`, which does not exist (RC -3), not to a shell, as
-under mod_rexx. The differences:
-
-- The request is an opaque handle (`orx:` and 16 hex digits), not a
-  pointer. A value that is not this request's handle (or its server's, or
-  its connection's, where those are expected) is Error 40.1 in the program;
-  under mod_rexx it crashed Apache's process.
-- `RexxPostReadRequestHandler` and `RexxTransHandler` work. Under mod_rexx
-  2.4.0 and Apache 2.4 they crashed Apache's process on every request,
-  whatever the program (mod_rexx looked up a path info that does not exist
-  yet in those phases). There, `WWWPATH_TRANSLATED` is the request's
-  directory, and `WWWFILENAME` is empty until the translation.
-- `WWWInternal_Redirect` works only in the content phase; anywhere else it
-  is Error 40.1, with a line in the error log saying why. Under mod_rexx it
-  crashed Apache's process.
-- All the program's output reaches the client (`Say`, `.output`,
-  `lineout`, `charout`...), not only `Say`; the request body can also be
-  read as input, and `WWWGetArgs` then gets what is left of it. A chunked
-  body is accepted.
-- `WWWGetArgs` sets `WWWARGS.0` to 0 when it has nothing to parse (a POST
-  that is not urlencoded, a PUT...); mod_rexx left it unset, and the usual
-  `do i = 1 to wwwargs.0` failed.
-- An error in the program is Apache's usual 500 page, and the error, with
-  its line, goes to the error log in one line; mod_rexx sent a page of its
-  own with the program's path and the error.
-- `WWWSERVER_SOFTWARE` does not include `Mod_Rexx/2.4.0`, which mod_rexx
-  added to Apache's own version string. `WWWGetVersion` and
-  `WWWGATEWAY_INTERFACE` say `Mod_Rexx/2.4.0`, in case a program checks.
-- The program's process environment is the CGI environment.
-- An internal redirect to a program (`ErrorDocument 404 /error.rex`, an
-  `Action`) works; under mod_rexx it crashed Apache's process, for the same
-  reason as its `PostReadRequest` and `Trans` phases.
-- `WWWReqRecNext`, `WWWReqRecPrev` and `WWWReqRecMain` give a handle to the
-  related request, or `(nil)` when there is none, as mod_rexx did. The
-  related request can be read with the same functions, but not changed
-  (Error 40.1). So a page for an `ErrorDocument` finds the request that
-  failed with `WWWReqRecPrev`, and a `LogHandler` finds where a request
-  was redirected to with `WWWReqRecNext`.
-- The subrequest functions (`WWWSub_Req_Lookup_URI`,
-  `WWWSub_Req_Lookup_File`, `WWWRun_Sub_Req`) are not there: a call to one
-  is Error 43, routine not found. Under mod_rexx no program could use them:
-  they returned the request's pointer in binary, which no other function
-  took (and their documentation gives the arguments in the wrong order).
-
-`WWWInternal_Redirect` is done when the program ends, and what the program
-wrote is dropped, as mod_rexx's output was.
+### Debugging the host
 
 To debug the host (under a debugger, say), set `OoRexxHost none`, choose an
 `OoRexxSocket` in a directory that Apache's user owns, and start the host
@@ -327,6 +242,9 @@ there yourself, as that user:
 ```sh
 sudo -u www-data oorexx-host --socket /run/oorexx/host.sock --processes 2
 ```
+
+With the mod_rexx layer loaded, give the host its plugin too:
+`--plugin 2:/usr/local/lib/mod_orx/orx_rexx_plugin.so`.
 
 ## Testing
 
@@ -352,18 +270,9 @@ including errors, timeouts and the error log.
 preloaded package shares between phases and what a program's own package
 does not, a missing file, and a file that fails to load.
 
-`tests/modrexx.sh`, run after the suite, checks `oorexx-modrexx` against
-the answers of mod_rexx 2.4.0 itself, measured on the same programs: every
-initial variable, every `WWW*` function, every write and what a later read
-sees, and what each kind of return value makes of the response.
-
-`tests/modrexx-phases.sh`, run after the suite, checks programs written for
-mod_rexx in every phase, with both sets of directives and one same
-configuration: what each phase sees, what its return values and its
-writes make of the request, authentication with `AuthType Basic` and with
-an `AuthType` of its own, inheritance, the body, and the error log. For
-the `Rexx*` set, the answers are those of mod_rexx 2.4.0 itself, except
-where it crashed.
+The suite and these three tests run without the mod_rexx layer. Its own
+tests, `tests/modrexx.sh` and `tests/modrexx-phases.sh`, load it for their
+run: see [modrexx/README.md](modrexx/README.md).
 
 ## License
 
