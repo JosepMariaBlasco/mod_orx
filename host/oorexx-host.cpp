@@ -538,6 +538,13 @@ static void serve(int fd)
 {
     g_fd = fd; g_in.clear(); g_in_eof = false; g_broken = false;
 
+    /* ACCEPT: until now the connection was only queued on the socket, and  */
+    /* the module, which waits for this frame within OoRexxQueueTimeout,    */
+    /* may have given up on it (then BEGIN never comes, and we return).     */
+    const unsigned char version = OORX_PROTOCOL_VERSION;
+    send_frame(OORX_ACCEPT, 0, &version, 1);
+    if (g_broken) return;
+
     /* BEGIN */
     int type, flags; uint32_t len;
     if (oorx_recv_header(fd, &type, &flags, &len) < 0 || type != OORX_BEGIN || len < 7)

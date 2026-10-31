@@ -12,6 +12,8 @@
  * Nothing is ever parsed as text: lengths come first, always. Key/value
  * tables are sequences of (u32 length, bytes) pairs.
  *
+ * Host -> module:  ACCEPT, as soon as a host process has taken the
+ *                  connection (until then, it is only queued on the socket)
  * Module -> host:  BEGIN, [ARGS], VARS, BODY
  * Host -> module:  READ, UPDATE, DATA, LOG, RESULT
  *
@@ -29,7 +31,7 @@
 #include <errno.h>
 #include <unistd.h>
 
-#define OORX_PROTOCOL_VERSION 0
+#define OORX_PROTOCOL_VERSION 1
 
 #define OORX_HEADER_SIZE      6
 #define OORX_MAX_FRAME        (1u << 24)   /* 16 MB: a sanity bound */
@@ -37,6 +39,8 @@
 
 /* Frame types */
 enum {
+    OORX_ACCEPT  = 'K',  /* H->M  u8 version: a host process has taken the
+                                  connection; the first frame of all       */
     OORX_BEGIN   = 'B',  /* M->H  u8 version, u8 phase, u8 class,
                                   u32 timeout (s), then the program path  */
     OORX_ARGS    = 'A',  /* M->H  the program's arguments, as a sequence of
