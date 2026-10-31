@@ -15,7 +15,7 @@ all: module host
 
 module: module/.libs/mod_orx.so
 
-module/.libs/mod_orx.so: module/mod_orx.c include/oorexx_protocol.h build/config.h
+module/.libs/mod_orx.so: module/mod_orx.c include/oorexx_protocol.h include/mod_orx.h build/config.h
 	$(APXS) -c -Wc,-Wall module/mod_orx.c
 
 # Where the module looks for oorexx-host when OoRexxHost is not set.
@@ -25,7 +25,7 @@ build/config.h: Makefile
 
 host: build/oorexx-host
 
-build/oorexx-host: host/oorexx-host.cpp include/oorexx_protocol.h
+build/oorexx-host: host/oorexx-host.cpp include/oorexx_protocol.h include/orx_host_plugin.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -o $@ host/oorexx-host.cpp \
 	    -I$(OOREXX_PREFIX)/include -L$(OOREXX_PREFIX)/lib \

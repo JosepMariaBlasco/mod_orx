@@ -81,6 +81,11 @@
 extern "C" {
 #include "../include/oorexx_protocol.h"
 }
+#include "../include/orx_host_plugin.h"
+
+/* The plugin of each class that has one (--plugin).                        */
+#define MAX_CLASSES 16
+static const orx_host_plugin *g_plugin[MAX_CLASSES];
 
 /* ------------------------------------------------------------------------ */
 /* Per-connection state. A child serves one connection at a time, so plain  */
@@ -334,20 +339,185 @@ static bool wd_disarm(void)
 }
 
 /* ------------------------------------------------------------------------ */
-/* The modrexx class: programs written for mod_rexx.                        */
+/* The snapshot of the request, and what the host offers to its plugins     */
 /*                                                                          */
-/* The module sends a snapshot of the request (keys in mod_orx.c). The     */
-/* program gets, instead of mod_rexx's request pointer, an opaque handle    */
-/* ("orx:" and 16 hex digits); WWWReqRecServer and WWWReqRecConnection      */
-/* give two more. The instance has two context exits: RXINI sets the        */
-/* initial variables before the program's first line, and RXOFNC answers    */
-/* the WWW* functions, which are called without being declared, as they    */
-/* were under mod_rexx (internal routines and built-ins still come first). */
-/* A read answers from the snapshot; a write changes the snapshot (so a     */
-/* later read sees it) and goes to the module as an UPDATE, which applies   */
-/* it to the request. A handle that is not one of this phase's, or a wrong  */
-/* number of arguments, is Error 40 in the program (mod_rexx crashed the    */
-/* worker on a bad pointer).                                                */
+/* With flag SNAPSHOT, VARS is the module's snapshot of the request and of  */
+/* the requests related to it (keys in oorexx_protocol.h). The host keeps   */
+/* it for the phase: a plugin reads it, and a change the program makes      */
+/* changes it too (a later read sees it) before it goes to the module as an */
+/* UPDATE. The "+" keys are the client's own; the host only keeps them, in  */
+/* order, for the plugin.                                                   */
+/* ------------------------------------------------------------------------ */
+
+/* Case-insensitive keys, as in Apache's tables.                            */
+struct nocase {
+    bool operator()(const std::string &a, const std::string &b) const
+    { return strcasecmp(a.c_str(), b.c_str()) < 0; }
+};
+/* Several entries may share a name; the first is the one apr_table_get     */
+/* gives, and a multimap keeps equal keys in the order they came.           */
+typedef std::multimap<std::string, std::string, nocase> table;
+
+struct snap_request {
+    std::map<std::string, std::string> r;   /* fields                       */
+    table t[5];                             /* i o x e n                    */
+};
+
+static const char g_tables[] = "ioxen";
+
+static struct {
+    std::vector<snap_request> req;          /* [0] the phase's request      */
+    std::vector<std::pair<std::string, std::string> > client;   /* "+" keys */
+} g_snap;
+
+static int table_index(char t)
+{
+    const char *p = t ? strchr(g_tables, t) : NULL;
+    return p ? (int)(p - g_tables) : -1;
+}
+
+/* One key of the snapshot.                                                 */
+static void snap_load(const std::string &k, const std::string &v)
+{
+    if (k.empty()) return;
+    if (k[0] == '+') { g_snap.client.push_back(std::make_pair(k.substr(1), v)); return; }
+    size_t q = 0, p = 0;
+    if (k.compare(0, 2, "q:") == 0) {       /* q:N then a kind, ':', name   */
+        p = 2;
+        while (p < k.size() && isdigit((unsigned char)k[p])) q = q * 10 + (k[p++] - '0');
+        if (q == 0 || q >= OORX_MAX_RELATED) return;
+    }
+    if (p + 2 > k.size() || k[p + 1] != ':') return;
+    char kind = k[p];
+    std::string name = k.substr(p + 2);
+    if (kind == 'E') { if (!q) setenv(name.c_str(), v.c_str(), 1); return; }
+    if (g_snap.req.size() <= q) g_snap.req.resize(q + 1);
+    if (kind == 'r') { g_snap.req[q].r[name] = v; return; }
+    int t = table_index(kind);
+    if (t >= 0) g_snap.req[q].t[t].insert(std::make_pair(name, v));
+}
+
+static void send_update(const char *op, const std::string &key, const std::string &val)
+{
+    std::string p;
+    unsigned char n[4];
+    const std::string f[3] = { op, key, val };
+    for (int i = 0; i < 3; i++) {
+        oorx_put_u32(n, (uint32_t)f[i].size());
+        p.append((const char *)n, 4);
+        p += f[i];
+    }
+    send_frame(OORX_UPDATE, 0, p.data(), (uint32_t)p.size());
+}
+
+/* The functions a plugin gets (orx_host_plugin.h).                         */
+static const char *api_field(int q, const char *name, size_t *len)
+{
+    if (q < 0 || (size_t)q >= g_snap.req.size()) return NULL;
+    std::map<std::string, std::string>::const_iterator f = g_snap.req[q].r.find(name);
+    if (f == g_snap.req[q].r.end()) return NULL;
+    if (len) *len = f->second.size();
+    return f->second.c_str();
+}
+
+static const char *api_table_get(int q, char t, const char *key, size_t *len)
+{
+    int i = table_index(t);
+    if (i < 0 || q < 0 || (size_t)q >= g_snap.req.size()) return NULL;
+    const table &tb = g_snap.req[q].t[i];
+    table::const_iterator e = tb.lower_bound(key);
+    if (e == tb.end() || strcasecmp(e->first.c_str(), key)) return NULL;
+    if (len) *len = e->second.size();
+    return e->second.c_str();
+}
+
+static void api_table_each(int q, char t, void *ctx, orx_kv_fn *fn)
+{
+    int i = table_index(t);
+    if (i < 0 || q < 0 || (size_t)q >= g_snap.req.size()) return;
+    const table &tb = g_snap.req[q].t[i];
+    for (table::const_iterator e = tb.begin(); e != tb.end(); ++e)
+        fn(ctx, e->first.data(), e->first.size(), e->second.data(), e->second.size());
+}
+
+static int api_related(void)
+{
+    return g_snap.req.empty() ? 0 : (int)g_snap.req.size() - 1;
+}
+
+static void api_client_each(void *ctx, orx_kv_fn *fn)
+{
+    for (size_t i = 0; i < g_snap.client.size(); i++)
+        fn(ctx, g_snap.client[i].first.data(), g_snap.client[i].first.size(),
+           g_snap.client[i].second.data(), g_snap.client[i].second.size());
+}
+
+/* The field each core field operation changes in the snapshot (the ones    */
+/* that are not in it, like status_line, only go to the module).           */
+static const char *op_field(char op)
+{
+    switch (op) {
+    case 'S': return "status";        case 'M': return "method";
+    case 'T': return "content_type";  case 'E': return "content_encoding";
+    case 'H': return "handler";       case 'G': return "content_languages";
+    case 'U': return "uri";           case 'F': return "filename";
+    case 'P': return "path_info";     case 'Q': return "args";
+    }
+    return NULL;
+}
+
+static void api_update(const char *op, const char *key, const char *value, size_t vl)
+{
+    std::string k = key ? key : "", v(value ? value : "", value ? vl : 0);
+    if (op[0] != '+' && oorx_op_index(op) >= 0) {
+        if (g_snap.req.empty()) g_snap.req.resize(1);
+        snap_request &s = g_snap.req[0];
+        if (op[1]) {
+            table &t = s.t[table_index(op[1])];
+            if (op[0] == 's' || op[0] == 'u') t.erase(k);
+            if (op[0] == 's' || op[0] == 'a') t.insert(std::make_pair(k, v));
+        } else if (const char *f = op_field(op[0])) {
+            std::string &cur = s.r[f];
+            if (op[0] == 'G') cur = cur.empty() ? v : cur + "," + v;   /* a list */
+            else cur = v;
+        }
+    }
+    send_update(op, k, v);
+}
+
+static void api_log(int level, const char *msg, size_t len) { send_log(level, msg, len); }
+
+static size_t api_read_body(char *buf, size_t max)
+{
+    if (g_in.empty()) fill_in(max);
+    size_t take = g_in.size() < max ? g_in.size() : max;
+    memcpy(buf, g_in.data(), take);
+    g_in.erase(0, take);
+    return take;
+}
+
+static const orx_host_api g_api = {
+    ORX_PLUGIN_ABI,
+    api_field, api_table_get, api_table_each, api_related, api_client_each,
+    api_update, api_log, api_read_body
+};
+
+/* ------------------------------------------------------------------------ */
+/* The modrexx class: programs written for mod_rexx (the mod_rexx layer)    */
+/*                                                                          */
+/* Written only against orx_host_plugin.h, as a plugin. The program gets,   */
+/* instead of mod_rexx's request pointer, an opaque handle ("orx:" and 16   */
+/* hex digits); WWWReqRecServer and WWWReqRecConnection give two more. The  */
+/* instance has two context exits: RXINI sets the initial variables before  */
+/* the program's first line, and RXOFNC answers the WWW* functions, which   */
+/* are called without being declared, as they were under mod_rexx (internal */
+/* routines and built-ins still come first). A read answers from the        */
+/* snapshot: the core's, and the layer's own "+" keys of the module         */
+/* (mod_orx.c): +v: the initial variables, +r: and +q:Nr: fields only       */
+/* mod_rexx reads, +s: and +c: its server and connection. A write goes      */
+/* through the host's update(). A handle that is not one of this phase's,   */
+/* or a wrong number of arguments, is Error 40 in the program (mod_rexx     */
+/* crashed the worker on a bad pointer).                                    */
 /*                                                                          */
 /* Behaviour measured against mod_rexx 2.4.0, function by function.        */
 /* WWWReqRecNext, WWWReqRecPrev and WWWReqRecMain give handles to read-only */
@@ -362,46 +532,47 @@ static bool wd_disarm(void)
 #define M_GET  0                    /* Apache's method numbers */
 #define M_POST 2
 
-/* Case-insensitive keys, as in Apache's tables.                            */
-struct nocase {
-    bool operator()(const std::string &a, const std::string &b) const
-    { return strcasecmp(a.c_str(), b.c_str()) < 0; }
-};
-typedef std::map<std::string, std::string, nocase> table;
-typedef std::map<std::string, std::string> fields;
+static const orx_host_api *rx_api;
 
-/* A request related to the phase's (WWWReqRecNext, WWWReqRecPrev,          */
-/* WWWReqRecMain), read-only: its handle, fields and tables. Number 0 is    */
-/* the phase's own request, whose snapshot is the one below.               */
-struct related { std::string h; fields r; table in, env, notes, err; };
+typedef std::map<std::string, std::string> fields;
 
 static struct {
     bool armed;                     /* the program is running             */
     int  phase;                     /* OORX_PHASE_*                       */
     std::string rh, sh, ch;         /* the handles                        */
-    std::vector<std::pair<std::string, std::string> > init;   /* v: */
-    fields r, s, c;                 /* fields of the request, server... */
-    table in, env, notes, err;      /* headers_in, subprocess_env, ...    */
-    std::vector<related> rel;       /* [0] unused: it is the above       */
+    std::vector<std::string> relh;  /* related requests' handles ([0] "") */
+    std::vector<std::pair<std::string, std::string> > init;   /* +v: */
+    std::vector<fields> own;        /* +r:, +q:Nr: by request             */
+    fields s, c;                    /* +s:, +c:                           */
 } g_mr;
 
 /* The number of the request whose handle h is (0: the phase's), or -1.     */
 static int request_of(const std::string &h)
 {
     if (h == g_mr.rh) return 0;
-    for (size_t k = 1; k < g_mr.rel.size(); k++) if (h == g_mr.rel[k].h) return (int)k;
+    for (size_t k = 1; k < g_mr.relh.size(); k++) if (h == g_mr.relh[k]) return (int)k;
     return -1;
 }
 
-static fields &fields_of(int q) { return q ? g_mr.rel[q].r : g_mr.r; }
-
-static table &table_of(int q, char kind)
+/* A field of request q: the layer's own, or the core's.                    */
+static std::string fld(int q, const std::string &key)
 {
-    if (q) {
-        related &x = g_mr.rel[q];
-        return kind == 'i' ? x.in : kind == 'e' ? x.env : kind == 'n' ? x.notes : x.err;
+    if ((size_t)q < g_mr.own.size()) {
+        fields::const_iterator f = g_mr.own[q].find(key);
+        if (f != g_mr.own[q].end()) return f->second;
     }
-    return kind == 'i' ? g_mr.in : kind == 'e' ? g_mr.env : kind == 'n' ? g_mr.notes : g_mr.err;
+    size_t n = 0;
+    const char *v = rx_api->field(q, key.c_str(), &n);
+    return v ? std::string(v, n) : std::string();
+}
+
+/* The first entry named key of table t (i x e n...) of request q, or "".    */
+static std::string tbl(int q, char t, const std::string &key, bool *found = NULL)
+{
+    size_t n = 0;
+    const char *v = rx_api->table_get(q, t, key.c_str(), &n);
+    if (found) *found = v != NULL;
+    return v ? std::string(v, n) : std::string();
 }
 
 static std::string new_handle(void)
@@ -418,58 +589,26 @@ static std::string new_handle(void)
     return h;
 }
 
-/* The snapshot, from VARS. The CGI environment (E:) goes to the process   */
-/* environment, as for a CGI.                                               */
-static void modrexx_load(const std::vector<std::pair<std::string, std::string> > &kv)
+/* The layer's "+" keys of the snapshot.                                    */
+static void mr_key(void *, const char *key, size_t kl, const char *value, size_t vl)
 {
-    g_mr.init.clear(); g_mr.r.clear(); g_mr.s.clear(); g_mr.c.clear();
-    g_mr.in.clear(); g_mr.env.clear(); g_mr.notes.clear(); g_mr.err.clear();
-    g_mr.rel.assign(1, related());
-    for (size_t i = 0; i < kv.size(); i++) {
-        const std::string &k = kv[i].first, &v = kv[i].second;
-        if (k.size() < 2 || k[1] != ':') continue;
-        std::string name = k.substr(2);
-        switch (k[0]) {
-        case 'v': g_mr.init.push_back(std::make_pair(name, v)); break;
-        case 'r': g_mr.r[name] = v; break;
-        case 's': g_mr.s[name] = v; break;
-        case 'c': g_mr.c[name] = v; break;
-        /* Like apr_table_get: the first of several with the same name.    */
-        case 'i': g_mr.in.insert(std::make_pair(name, v)); break;
-        case 'e': g_mr.env.insert(std::make_pair(name, v)); break;
-        case 'n': g_mr.notes.insert(std::make_pair(name, v)); break;
-        case 'x': g_mr.err.insert(std::make_pair(name, v)); break;
-        case 'E': setenv(name.c_str(), v.c_str(), 1); break;
-        case 'q': {                 /* q:N then a kind, ':' and the name   */
-            size_t e = 0;
-            unsigned long n = strtoul(name.c_str(), NULL, 10);
-            while (e < name.size() && isdigit((unsigned char)name[e])) e++;
-            if (!n || n > 64 || e + 2 > name.size() || name[e + 1] != ':') break;
-            if (g_mr.rel.size() <= n) g_mr.rel.resize(n + 1);
-            std::string f = name.substr(e + 2);
-            if (name[e] == 'r') g_mr.rel[n].r[f] = v;
-            else if (strchr("ienx", name[e]))
-                table_of((int)n, name[e]).insert(std::make_pair(f, v));
-            break;
-        }
-        }
+    std::string k(key, kl), v(value, vl);
+    if (k.size() < 2) return;
+    if (k.compare(0, 2, "v:") == 0) { g_mr.init.push_back(std::make_pair(k.substr(2), v)); return; }
+    if (k.compare(0, 2, "s:") == 0) { g_mr.s[k.substr(2)] = v; return; }
+    if (k.compare(0, 2, "c:") == 0) { g_mr.c[k.substr(2)] = v; return; }
+    size_t q = 0, p = 0;
+    if (k.compare(0, 2, "q:") == 0) {
+        p = 2;
+        while (p < k.size() && isdigit((unsigned char)k[p])) q = q * 10 + (k[p++] - '0');
+        if (q == 0 || q >= OORX_MAX_RELATED) return;
     }
-    for (size_t k = 1; k < g_mr.rel.size(); k++) g_mr.rel[k].h = new_handle();
-    g_mr.rh = new_handle(); g_mr.sh = new_handle(); g_mr.ch = new_handle();
+    if (k.compare(p, 2, "r:") != 0) return;
+    if (g_mr.own.size() <= q) g_mr.own.resize(q + 1);
+    g_mr.own[q][k.substr(p + 2)] = v;
 }
 
-static void send_update(const char *op, const std::string &key, const std::string &val)
-{
-    std::string p;
-    unsigned char n[4];
-    const std::string f[3] = { op, key, val };
-    for (int i = 0; i < 3; i++) {
-        oorx_put_u32(n, (uint32_t)f[i].size());
-        p.append((const char *)n, 4);
-        p += f[i];
-    }
-    send_frame(OORX_UPDATE, 0, p.data(), (uint32_t)p.size());
-}
+static void send_log_str(int level, const std::string &m) { rx_api->log(level, m.data(), m.size()); }
 
 static std::string itos(long v)
 {
@@ -547,15 +686,16 @@ static void parse_vars(RexxExitContext *c, const std::string &data)
 
 static void get_args(RexxExitContext *c)
 {
-    long method = atol(g_mr.r["method_number"].c_str());
-    if (method == M_GET) { parse_vars(c, g_mr.r["args"]); return; }
+    long method = atol(fld(0, "method_number").c_str());
+    if (method == M_GET) { parse_vars(c, fld(0, "args")); return; }
     if (method == M_POST) {
-        table::iterator t = g_mr.in.find("Content-Type");
-        if (t == g_mr.in.end() ||
-            !strcasecmp(t->second.c_str(), "application/x-www-form-urlencoded")) {
-            while (fill_in(OORX_CHUNK)) ;          /* the whole body       */
-            std::string data;
-            data.swap(g_in);
+        bool found;
+        std::string ct = tbl(0, 'i', "Content-Type", &found);
+        if (!found || !strcasecmp(ct.c_str(), "application/x-www-form-urlencoded")) {
+            std::string data;                       /* the whole body       */
+            char buf[OORX_CHUNK];
+            size_t n;
+            while ((n = rx_api->read_body(buf, sizeof buf)) > 0) data.append(buf, n);
             parse_vars(c, data);
             setvar(c, "WWWPOST_STRING", data);
             return;
@@ -568,10 +708,10 @@ static void get_args(RexxExitContext *c)
 
 static void get_cookies(RexxExitContext *c)
 {
-    table::iterator t = g_mr.in.find("Cookie");
+    bool found;
+    std::string data = tbl(0, 'i', "Cookie", &found);
     int num = 0;
-    if (t != g_mr.in.end()) {
-        const std::string &data = t->second;
+    if (found) {
         for (size_t pos = 0; pos < data.size(); ) {
             std::string pair = getword(data, pos, ';');
             if (pos < data.size() && data[pos] == ' ') pos++;
@@ -636,11 +776,11 @@ static const struct { const char *fn, *key; } ro_fields[] = {
     { "WWWREQRECUSER", "user" },                { "WWWREQRECAUTH_TYPE", "auth_type" },
 };
 /* Tables: (r, key) reads, (r, key, value) writes.                          */
-static const struct { const char *fn, *op; } rw_tables[] = {
-    { "WWWREQRECHEADER_IN",      "i" },
-    { "WWWREQRECERR_HEADER_OUT", "x" },
-    { "WWWREQRECSUBPROCESS_ENV", "e" },
-    { "WWWREQRECNOTES",          "n" },
+static const struct { const char *fn; char table; const char *op; } rw_tables[] = {
+    { "WWWREQRECHEADER_IN",      'i', "si" },
+    { "WWWREQRECERR_HEADER_OUT", 'x', "sx" },
+    { "WWWREQRECSUBPROCESS_ENV", 'e', "se" },
+    { "WWWREQRECNOTES",          'n', "sn" },
 };
 
 static int RexxEntry modrexx_ini(RexxExitContext *c, int, int sub, PEXIT)
@@ -691,62 +831,57 @@ static int RexxEntry modrexx_fnc(RexxExitContext *c, int, int sub, PEXIT parm)
         if (argc > 2 || q < 0 || (argc == 2 && (!ARG(1) || q != 0))) BAD();
         if (argc == 2) {
             std::string v = f.numeric ? itos(atoi(a[1].c_str())) : a[1];
-            std::string &cur = g_mr.r[f.key];
-            if (f.op[0] == 'G') cur = cur.empty() ? v : cur + "," + v;   /* a list */
-            else cur = v;
-            send_update(f.op, "", v);
+            /* A field of the layer's own is kept here; a core one, by the  */
+            /* host's update().                                             */
+            fields::iterator own = g_mr.own[0].find(f.key);
+            if (own != g_mr.own[0].end()) own->second = v;
+            rx_api->update(f.op, "", v.data(), v.size());
             if (!f.ret_new) RET("");
         }
-        RET(fields_of(q)[f.key]);
+        RET(fld(q, f.key));
     }
     for (size_t i = 0; i < sizeof ro_fields / sizeof *ro_fields; i++) {
         if (fn != ro_fields[i].fn) continue;
         if (argc > 1 || q < 0) BAD();
-        RET(fields_of(q)[ro_fields[i].key]);
+        RET(fld(q, ro_fields[i].key));
     }
     for (size_t i = 0; i < sizeof rw_tables / sizeof *rw_tables; i++) {
         if (fn != rw_tables[i].fn) continue;
         if (argc < 2 || argc > 3 || q < 0 || !ARG(1) || (argc == 3 && (!ARG(2) || q != 0)))
             BAD();
-        table &t = table_of(q, rw_tables[i].op[0]);
-        if (argc == 2) {
-            table::iterator e = t.find(a[1]);
-            RET(e == t.end() ? "" : e->second);
-        }
-        t.erase(a[1]); t.insert(std::make_pair(a[1], a[2]));
-        send_update(rw_tables[i].op, a[1], a[2]);
+        if (argc == 2) RET(tbl(q, rw_tables[i].table, a[1]));
+        rx_api->update(rw_tables[i].op, a[1].c_str(), a[2].data(), a[2].size());
         RET("");
     }
     if (fn == "WWWREQRECHEADER_OUT" || fn == "WWWSETHEADERVALUE") {
         if (argc != 3 || !IS(0, g_mr.rh) || !ARG(1) || !ARG(2)) BAD();
-        send_update("o", a[1], a[2]);
+        rx_api->update("so", a[1].c_str(), a[2].data(), a[2].size());
         RET("");
     }
     if (fn == "WWWADDCOOKIE") {
         if (argc != 2 || !IS(0, g_mr.rh) || !ARG(1)) BAD();
-        send_update("a", "Set-Cookie", a[1]);
+        rx_api->update("ao", "Set-Cookie", a[1].data(), a[1].size());
         RET("");
     }
     if (fn == "WWWSENDHTTPHEADER") {
         /* Only the content type: the headers go with the first output that */
         /* reaches the client, or at the end.                               */
         if (argc != 2 || !IS(0, g_mr.rh) || !ARG(1)) BAD();
-        g_mr.r["content_type"] = a[1];
-        send_update("T", "", a[1]);
+        rx_api->update("T", "", a[1].data(), a[1].size());
         RET("");
     }
     if (fn == "WWWLOGERROR" || fn == "WWWLOGWARNING" || fn == "WWWLOGINFO") {
         if (argc != 2 || !IS(0, g_mr.rh) || !ARG(1)) BAD();
-        send_log(fn == "WWWLOGERROR" ? OORX_LOG_ERR : fn == "WWWLOGWARNING" ?
-                 OORX_LOG_WARNING : OORX_LOG_INFO, a[1].c_str(), strlen(a[1].c_str()));
+        rx_api->log(fn == "WWWLOGERROR" ? OORX_LOG_ERR : fn == "WWWLOGWARNING" ?
+                    OORX_LOG_WARNING : OORX_LOG_INFO, a[1].c_str(), strlen(a[1].c_str()));
         RET("");
     }
     if (fn == "WWWLOGREASON") {
         /* mod_rexx logs it with no level, which is Apache's "emerg".       */
         if (argc != 3 || !IS(0, g_mr.rh) || !ARG(1) || !ARG(2)) BAD();
         std::string m = "Access to " + std::string(a[2].c_str()) + " failed for " +
-                        g_mr.r["remote_name"] + ". reason: " + a[1].c_str();
-        send_log(OORX_LOG_EMERG, m.data(), m.size());
+                        fld(0, "remote_name") + ". reason: " + a[1].c_str();
+        send_log_str(OORX_LOG_EMERG, m);
         RET("");
     }
     if (fn == "WWWGETARGS" || fn == "WWWGETCOOKIES") {
@@ -761,10 +896,10 @@ static int RexxEntry modrexx_fnc(RexxExitContext *c, int, int sub, PEXIT parm)
         if (g_mr.phase != OORX_PHASE_CONTENT) {
             static const char m[] = "oorexx-host: WWWInternal_Redirect is only "
                                     "available in the content phase";
-            send_log(OORX_LOG_ERR, m, sizeof m - 1);
+            rx_api->log(OORX_LOG_ERR, m, sizeof m - 1);
             BAD();
         }
-        send_update("R", "", a[1]);
+        rx_api->update("+R", "", a[1].data(), a[1].size());
         RET("");
     }
     if (fn == "WWWESCAPE_PATH") {
@@ -773,7 +908,7 @@ static int RexxEntry modrexx_fnc(RexxExitContext *c, int, int sub, PEXIT parm)
     }
     if (fn == "WWWCONSTRUCT_URL") {
         if (argc != 2 || !IS(0, g_mr.rh) || !ARG(1)) BAD();
-        RET(g_mr.r["url_prefix"] + a[1].c_str());
+        RET(fld(0, "url_prefix") + a[1].c_str());
     }
     if (fn == "WWWHTTP_TIME") {
         if (argc != 1 || !IS(0, g_mr.rh)) BAD();
@@ -787,11 +922,11 @@ static int RexxEntry modrexx_fnc(RexxExitContext *c, int, int sub, PEXIT parm)
     if (fn == "WWWREQRECNEXT" || fn == "WWWREQRECPREV" || fn == "WWWREQRECMAIN") {
         /* mod_rexx printed the pointer with %p: "(nil)" for none.         */
         if (argc > 1 || q < 0) BAD();
-        const std::string &l = fields_of(q)[fn == "WWWREQRECNEXT" ? "next" :
-                                            fn == "WWWREQRECPREV" ? "prev" : "main"];
+        std::string l = fld(q, fn == "WWWREQRECNEXT" ? "next" :
+                               fn == "WWWREQRECPREV" ? "prev" : "main");
         if (l.empty()) RET("(nil)");
         size_t k = strtoul(l.c_str(), NULL, 10);
-        RET(k == 0 ? g_mr.rh : k < g_mr.rel.size() ? g_mr.rel[k].h : "(nil)");
+        RET(k == 0 ? g_mr.rh : k < g_mr.relh.size() ? g_mr.relh[k] : "(nil)");
     }
     if (fn == "WWWREQRECSERVER" || fn == "WWWREQRECCONNECTION") {
         if (argc > 1 || q < 0) BAD();
@@ -818,6 +953,50 @@ done:
     if (bad) fp->rxfnc_flags.rxfferr = 1;     /* Error 40 in the program    */
     else fp->rxfnc_retc = c->NewString(ret.data(), ret.size());
     return RXEXIT_HANDLED;
+}
+
+
+/* The plugin.                                                              */
+static RexxContextExit rx_exits[3] = { { modrexx_ini, RXINI }, { modrexx_fnc, RXOFNC },
+                                       { NULL, 0 } };
+static const char *rx_argv[1];
+static size_t rx_argl[1];
+
+static int rx_begin(int phase, const char *, orx_instance_policy *pol)
+{
+    /* Every phase there is, as under mod_rexx.                             */
+    if (phase < OORX_PHASE_CONTENT || phase > OORX_PHASE_FIXUP) return 1;
+    g_mr.phase = phase;
+    g_mr.armed = false;
+    g_mr.init.clear(); g_mr.own.assign(1, fields()); g_mr.s.clear(); g_mr.c.clear();
+    rx_api->client_each(NULL, mr_key);
+    g_mr.relh.assign(rx_api->related() + 1, std::string());
+    for (size_t k = 1; k < g_mr.relh.size(); k++) g_mr.relh[k] = new_handle();
+    g_mr.rh = new_handle(); g_mr.sh = new_handle(); g_mr.ch = new_handle();
+    pol->exits = rx_exits;
+    pol->address = "WWW";            /* mod_rexx's: no such environment, so  */
+                                     /* a command fails (RC -3) instead of   */
+                                     /* reaching a shell                     */
+    pol->cwd = "/";                  /* Apache's directory, as under mod_rexx */
+    pol->quiet_flush = 0;            /* mod_rexx could not flush             */
+    pol->output_to_log = 0;          /* outside the content phase, the module */
+                                     /* drops it                             */
+    rx_argv[0] = g_mr.rh.c_str(); rx_argl[0] = g_mr.rh.size();
+    pol->argc = 1; pol->argv = rx_argv; pol->argl = rx_argl;   /* its request */
+    return 0;
+}
+
+static void rx_running(int on) { g_mr.armed = on != 0; }
+static void rx_end(void) { }
+
+static const orx_host_plugin rx_plugin = {
+    ORX_PLUGIN_ABI, OORX_CLASS_MODREXX, rx_begin, rx_running, rx_end
+};
+
+static const orx_host_plugin *rx_plugin_init(const orx_host_api *api)
+{
+    rx_api = api;
+    return &rx_plugin;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -871,16 +1050,13 @@ static void serve(int fd)
     unsigned timeout = oorx_get_u32(b + 3);
     std::string program = begin.substr(7);
     /* The content phase runs CGI programs; the hooks (authn, authz, log)   */
-    /* run native ones: arguments in, a verdict out.                        */
-    /* A modrexx program runs in any phase; its output in a phase that is  */
-    /* not the content goes nowhere, as under mod_rexx (the module drops    */
-    /* it), so it is not a hook in this sense.                              */
-    bool modrexx = klass == OORX_CLASS_MODREXX &&
-                   phase >= OORX_PHASE_CONTENT && phase <= OORX_PHASE_FIXUP;
+    /* run native ones: arguments in, a verdict out. A class with a plugin  */
+    /* is the plugin's, in the phases it accepts.                           */
+    const orx_host_plugin *plugin = klass > 0 && klass < MAX_CLASSES ? g_plugin[klass] : NULL;
     bool hook = klass == OORX_CLASS_NATIVE &&
                 (phase == OORX_PHASE_AUTHN || phase == OORX_PHASE_AUTHZ ||
                  phase == OORX_PHASE_LOG);
-    if (!(phase == OORX_PHASE_CONTENT && klass == OORX_CLASS_CGI) && !hook && !modrexx) {
+    if (!(phase == OORX_PHASE_CONTENT && klass == OORX_CLASS_CGI) && !hook && !plugin) {
         logf_conn("oorexx-host: phase/class not implemented yet for %s", program.c_str());
         send_result(501);
         return;
@@ -895,13 +1071,15 @@ static void serve(int fd)
         if (!parse_strings(a, args)) return;
         if (oorx_recv_header(fd, &type, &flags, &len) < 0) return;
     }
-    /* VARS: becomes the process environment, exactly as a CGI's; for the   */
-    /* modrexx class, it is the snapshot of the request.                    */
+    /* VARS: a bare environment, which becomes the process environment,     */
+    /* exactly as a CGI's; or, with flag SNAPSHOT, the snapshot of the      */
+    /* request (whose E: keys are that environment).                        */
     if (type != OORX_VARS) return;
     std::string vars(len, '\0');
     if (len && oorx_read_all(fd, &vars[0], len) < 0) return;
     clearenv();
-    std::vector<std::pair<std::string, std::string> > kv;
+    g_snap.req.clear(); g_snap.client.clear();
+    bool snapshot = (flags & OORX_FLAG_SNAPSHOT) != 0;
     for (size_t p = 0; p + 4 <= vars.size(); ) {
         uint32_t kl = oorx_get_u32((const unsigned char *)&vars[p]); p += 4;
         if (p + kl + 4 > vars.size()) break;
@@ -909,36 +1087,43 @@ static void serve(int fd)
         uint32_t vl = oorx_get_u32((const unsigned char *)&vars[p]); p += 4;
         if (p + vl > vars.size()) break;
         std::string v = vars.substr(p, vl); p += vl;
-        if (modrexx) kv.push_back(std::make_pair(k, v));
+        if (snapshot) snap_load(k, v);
         else setenv(k.c_str(), v.c_str(), 1);
     }
-    if (modrexx) { modrexx_load(kv); g_mr.phase = phase; }
 
-    /* Like mod_cgi: run in the program's directory; a modrexx program, in   */
-    /* Apache's, the root, as under mod_rexx.                                */
-    std::string dir = modrexx ? "/" : program.substr(0, program.rfind('/') + 1);
+    /* The instance's policy: the plugin's, or the core's (a CGI's or a    */
+    /* hook's).                                                             */
+    orx_instance_policy pol;
+    memset(&pol, 0, sizeof pol);
+    pol.quiet_flush = 1;
+    pol.output_to_log = hook;
+    if (plugin && plugin->begin(phase, program.c_str(), &pol)) {
+        logf_conn("oorexx-host: phase not served by its class for %s", program.c_str());
+        send_result(500);
+        return;
+    }
+
+    /* Like mod_cgi: run in the program's directory, unless the policy      */
+    /* says otherwise.                                                      */
+    std::string dir = pol.cwd ? pol.cwd : program.substr(0, program.rfind('/') + 1);
     if (!dir.empty() && chdir(dir.c_str()) < 0) { /* not fatal */ }
 
     /* A fresh instance for this phase.                                     */
     RexxLibraryPackage lib = { "OORXHOST", &host_package };
-    RexxContextExit exits[3] = { { modrexx_ini, RXINI }, { modrexx_fnc, RXOFNC },
-                                 { NULL, 0 } };
     RexxOption opts[4];
-    opts[0].optionName = REGISTER_LIBRARY; opts[0].option = (void *)&lib;
-    opts[1].optionName = NULL;
-    if (modrexx) {
-        opts[1].optionName = DIRECT_EXITS; opts[1].option = (void *)exits;
-        /* mod_rexx's: no such environment, so a command fails (RC -3)     */
-        /* instead of reaching a shell.                                     */
-        opts[2].optionName = INITIAL_ADDRESS_ENVIRONMENT; opts[2].option = "WWW";
-        opts[3].optionName = NULL;
+    int no = 0;
+    opts[no].optionName = REGISTER_LIBRARY; opts[no++].option = (void *)&lib;
+    if (pol.exits) { opts[no].optionName = DIRECT_EXITS; opts[no++].option = (void *)pol.exits; }
+    if (pol.address) {
+        opts[no].optionName = INITIAL_ADDRESS_ENVIRONMENT; opts[no++].option = pol.address;
     }
-    g_mr.armed = false;
-    g_quiet_flush = !modrexx;
+    opts[no].optionName = NULL;
+    g_quiet_flush = pol.quiet_flush != 0;
     RexxInstance *inst; RexxThreadContext *tc;
     if (!RexxCreateInterpreter(&inst, &tc, opts)) {
         logf_conn("oorexx-host: cannot create an interpreter instance%s", "");
         send_result(500);
+        if (plugin) plugin->end();
         return;
     }
 
@@ -951,6 +1136,7 @@ static void serve(int fd)
         inst->Terminate();
         logf_conn("oorexx-host: cannot create the output pipe%s", "");
         send_result(500);
+        if (plugin) plugin->end();
         return;
     }
     pthread_create(&pump, NULL, output_pump, (void *)(intptr_t)pfd[0]);
@@ -962,7 +1148,7 @@ static void serve(int fd)
     RexxObjectPtr out = NULLOBJECT;
     if (boot != NULLOBJECT && !tc->CheckCondition()) {
         RexxArrayObject bargs = tc->ArrayOfTwo(tc->String(pipe_path),
-                                               hook ? tc->True() : tc->False());
+                                               pol.output_to_log ? tc->True() : tc->False());
         out = tc->CallRoutine(boot, bargs);
     }
     if (out == NULLOBJECT || tc->CheckCondition()) {
@@ -971,17 +1157,21 @@ static void serve(int fd)
         status = 500;
     } else {
         RexxArrayObject pargs = NULLOBJECT;
-        /* A modrexx program's only argument: its request.                  */
-        if (modrexx) args.assign(1, g_mr.rh);
+        /* A plugin's program gets the arguments the plugin gives.          */
+        if (plugin) {
+            args.clear();
+            for (size_t i = 0; i < pol.argc; i++)
+                args.push_back(std::string(pol.argv[i], pol.argl[i]));
+        }
         if (!args.empty()) {
             pargs = tc->NewArray(args.size());
             for (size_t i = 0; i < args.size(); i++)
                 tc->ArrayPut(pargs, tc->NewString(args[i].data(), args[i].size()), i + 1);
         }
         wd_arm(inst, timeout);
-        g_mr.armed = modrexx;
+        if (plugin) plugin->running(1);
         RexxObjectPtr ret = tc->CallProgram(program.c_str(), pargs);
-        g_mr.armed = false;
+        if (plugin) plugin->running(0);
         bool halted = wd_disarm();
         if (!tc->CheckCondition() && ret != NULLOBJECT) {
             RexxStringObject rs = tc->ObjectToString(ret);
@@ -1005,14 +1195,15 @@ static void serve(int fd)
             tc->ClearCondition();
             send_log(OORX_LOG_ERR, m.data(), m.size());
             /* A CGI's failure shows in its output; a hook's is its verdict; */
-            /* a modrexx program's, a 500, as under mod_rexx.                */
-            if (hook || modrexx) { status = 500; has_value = false; }
+            /* a plugin's program's, a 500 (mod_rexx's did the same).        */
+            if (hook || plugin) { status = 500; has_value = false; }
         }
         /* Close the program's output: flushes what the stream still holds. */
         tc->SendMessage0(out, "CLOSE");
         tc->ClearCondition();
     }
     inst->Terminate();
+    if (plugin) plugin->end();
     close(pfd[1]);
     pthread_join(pump, NULL);          /* all output forwarded */
     send_result(status, has_value ? &value : NULL);
@@ -1206,6 +1397,8 @@ int main(int argc, char **argv)
         else { usage(argv[0]); return EXIT_CONFIG; }
     }
     if (max_procs < 0) max_procs = min_procs;
+    /* The mod_rexx layer, built in for now.                                */
+    g_plugin[OORX_CLASS_MODREXX] = rx_plugin_init(&g_api);
     if ((path == NULL) == (listen_fd < 0) || min_procs < 1 || max_procs < min_procs
         || grace < 0) {
         usage(argv[0]);

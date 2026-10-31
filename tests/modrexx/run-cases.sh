@@ -9,7 +9,7 @@
 #
 # Copyright 2026 Josep Maria Blasco -- Apache License 2.0
 
-PORT=$1; CASES=$2; PHLOG=$3; H=${4:-oorexx-modrexx}; D=${5:-/var/www/html}
+PORT=$1; CASES=$2; PHLOG=$3; H=${4:-rexx-handler}; D=${5:-/var/www/html}
 LOG=/var/log/apache2/error.log
 TMP=$(mktemp -d)
 grep -v '^#' "$CASES" | grep -v '^ *$' | while read -r name path opts; do

@@ -43,13 +43,12 @@ enum {
                                   (u32 length, bytes); optional, between
                                   BEGIN and VARS                           */
     OORX_VARS    = 'V',  /* M->H  key/value table: the CGI environment;
-                                  for the modrexx class, the snapshot of
-                                  the request (see oorexx-host.cpp)        */
+                                  with flag SNAPSHOT, the snapshot of the
+                                  request (keys below)                    */
     OORX_BODY    = 'b',  /* M->H  request body chunk; length 0 = EOF      */
     OORX_READ    = 'R',  /* H->M  u32: please send up to n body bytes     */
-    OORX_UPDATE  = 'U',  /* H->M  modrexx class: one change to the request
-                                  (status, a header, a field...), as three
-                                  strings: operation, key, value           */
+    OORX_UPDATE  = 'U',  /* H->M  one change to the request, as three
+                                  strings: operation, key, value (below)   */
     OORX_DATA    = 'D',  /* H->M  response bytes; flag FLUSH = flush now  */
     OORX_LOG     = 'L',  /* H->M  u8 level, then the message              */
     OORX_RESULT  = 'E'   /* H->M  u32 status (0 = OK), end of the phase;
@@ -60,6 +59,7 @@ enum {
 /* Flags */
 #define OORX_FLAG_FLUSH 0x01     /* DATA: flush now                        */
 #define OORX_FLAG_VALUE 0x02     /* RESULT: the program returned a value   */
+#define OORX_FLAG_SNAPSHOT 0x04  /* VARS: a snapshot, not a bare environment */
 
 /* Phases: Apache's hooks (authn = check_user_id, authz = auth_checker) */
 enum { OORX_PHASE_CONTENT = 1, OORX_PHASE_AUTHN = 2, OORX_PHASE_AUTHZ = 3,
@@ -67,8 +67,51 @@ enum { OORX_PHASE_CONTENT = 1, OORX_PHASE_AUTHN = 2, OORX_PHASE_AUTHZ = 3,
        OORX_PHASE_HEADER_PARSER = 7, OORX_PHASE_ACCESS = 8,
        OORX_PHASE_TYPE = 9, OORX_PHASE_FIXUP = 10 };
 
-/* Program classes */
+/* Program classes. CGI and NATIVE are the core's; MODREXX is served by    */
+/* the optional mod_rexx layer, through its plugin of the host.            */
 enum { OORX_CLASS_CGI = 1, OORX_CLASS_MODREXX = 2, OORX_CLASS_NATIVE = 3 };
+
+/* The snapshot (VARS with flag SNAPSHOT). Every key starts with what it is: */
+/*                                                                          */
+/*   r:NAME      a field of the request, by its name in request_rec:        */
+/*               the_request protocol method unparsed_uri uri args filename */
+/*               path_info hostname handler content_type content_encoding  */
+/*               content_languages (comma separated) status bytes_sent user */
+/*               auth_type useragent_ip server_name server_port; and next,  */
+/*               prev, main: the number of that related request, or ""     */
+/*   i: o: x: e: n:   an entry of headers_in, headers_out, err_headers_out, */
+/*               subprocess_env, notes (all of them, repeated ones too)    */
+/*   q:N then one of the above (q:2r:uri, q:2i:Host): related request N    */
+/*               (next, prev and main, followed from the request: 1..24)   */
+/*   E:NAME      the CGI environment, which becomes the program's own      */
+/*   +...        the client's own: not the core's business; the host hands */
+/*               these to the client's plugin, in their order              */
+#define OORX_MAX_RELATED 24
+
+/* UPDATE operations of the core. Fields: one letter, no key. Tables: an   */
+/* action (s set, a add, u unset) and the table (i o x e n, as above), the */
+/* key being the entry's name. An operation that starts with "+" is the    */
+/* client's own. The index of each one is its bit in a phase's allow mask. */
+static const char *const oorx_ops[] = {
+    "S", "L", "M", "N", "A", "C",   /* status status_line method          */
+                                    /* method_number allowed no_cache     */
+    "T", "E", "H", "G",             /* content_type content_encoding      */
+                                    /* handler content_languages (adds)   */
+    "U", "F", "P", "Q",             /* uri filename path_info args        */
+    "si", "so", "sx", "se", "sn",
+    "ai", "ao", "ax", "ae", "an",
+    "ui", "uo", "ux", "ue", "un",
+    NULL
+};
+#define OORX_ALLOW_ALL 0xFFFFFFFFu
+
+/* The index of a core operation, or -1. */
+static inline int oorx_op_index(const char *op)
+{
+    int i;
+    for (i = 0; oorx_ops[i]; i++) if (!strcmp(op, oorx_ops[i])) return i;
+    return -1;
+}
 
 /* LOG levels: the numbers of Apache's APLOG_* levels */
 enum { OORX_LOG_EMERG = 0, OORX_LOG_ERR = 3, OORX_LOG_WARNING = 4, OORX_LOG_INFO = 6 };

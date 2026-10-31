@@ -1,29 +1,24 @@
 #!/bin/sh
 # Check programs written for mod_rexx in every phase of the request, with
-# both sets of directives:
-#
-#   Rexx*    mod_rexx's own, with its meaning: the configuration a site
-#            had for mod_rexx, as it was. Measured against mod_rexx 2.4.0
-#            itself (Apache 2.4.58, ooRexx 5.3.0) with this same
-#            configuration and these same cases: the answers are the same,
-#            except where mod_rexx crashed Apache's process (its
-#            PostReadRequest and Trans phases always did, and so did
-#            WWWInternal_Redirect outside the content phase), the form of
-#            the error log's lines, and a WWWInternal_Redirect from the
-#            content phase, which mod_rexx answered with a broken response.
-#   OoRexx*  mod_orx's: each phase where its name says, inheritance, and
-#            "none".
+# mod_rexx's own directives (Rexx*) and their meaning: the configuration a
+# site had for mod_rexx, as it was. Measured against mod_rexx 2.4.0 itself
+# (Apache 2.4.58, ooRexx 5.3.0) with this same configuration and these same
+# cases: the answers are the same, except where mod_rexx crashed Apache's
+# process (its PostReadRequest and Trans phases always did, and so did
+# WWWInternal_Redirect outside the content phase), the form of the error
+# log's lines, and a WWWInternal_Redirect from the content phase, which
+# mod_rexx answered with a broken response.
 #
 # One program, tests/modrexx/phase.rex, is installed once per phase, with
 # the phase as its name; it logs what it sees and does what the request
 # header X-Act asks of it. tests/modrexx/phases.cases lists the requests;
 # tests/modrexx/run-cases.sh runs them and prints what came back, which is
-# compared with phases-rexx.expected and phases-oorexx.expected.
+# compared with phases-rexx.expected.
 #
 # Run after tests/rexxhttp-suite.sh, which leaves Apache configured with
 # mod_orx (any MPM). mod_rexx must not be loaded: it defines the same
-# Rexx* directives. Runs as root; listens on ports 8091 and 8092 for the
-# run. Leaves nothing behind.
+# Rexx* directives. Runs as root; listens on port 8091 for the run. Leaves
+# nothing behind.
 #
 #   tests/modrexx-phases.sh            check
 #   tests/modrexx-phases.sh --update   rewrite the expected files
@@ -44,7 +39,7 @@ PHASES="PostReadRequest Trans HeaderParser Access Authen Authz Type Fixup Log"
 ok()   { echo "  ok    $1"; }
 fail() { echo "  FAIL  $1"; FAILS=$((FAILS + 1)); }
 
-# vhost PREFIX PORT HANDLER: the same configuration for both sets.
+# vhost PREFIX PORT HANDLER: the configuration.
 vhost() {
     echo "Listen $2"
     echo "<VirtualHost *:$2>"
@@ -93,11 +88,11 @@ echo nofix > "$DOC/nofix/s.txt"
 htpasswd -bc "$PROG/users" alice secret 2>/dev/null
 touch "$LOGS/8091.log" "$LOGS/8092.log"
 chmod -R a+rX "$LAB"; chown -R www-data "$LOGS"
-{ vhost Rexx 8091 rexx-handler; vhost OoRexx 8092 oorexx-modrexx; } > "$CONF"
+vhost Rexx 8091 rexx-handler > "$CONF"
 a2enconf oorexx-phases >/dev/null
 apachectl -k graceful; sleep 2
 
-for run in "rexx 8091 rexx-handler" "oorexx 8092 oorexx-modrexx"; do
+for run in "rexx 8091 rexx-handler"; do
     set -- $run
     echo "== The $1 set ($3)"
     "$HERE/modrexx/run-cases.sh" "$2" "$HERE/modrexx/phases.cases" "$LOGS/$2.log" "$3" "$DOC" \

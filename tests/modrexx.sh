@@ -1,5 +1,5 @@
 #!/bin/sh
-# Check the modrexx class (handler oorexx-modrexx): programs written for
+# Check the modrexx class (handler rexx-handler): programs written for
 # mod_rexx run unchanged. The expected answers were measured under mod_rexx
 # 2.4.0 itself, built from its SourceForge repository, on Apache 2.4.58 and
 # ooRexx 5.3.0, with the same programs (tests/modrexx/*.rex):
@@ -19,10 +19,10 @@
 # Copyright 2026 Josep Maria Blasco -- Apache License 2.0
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-LAB=/var/www/html/oorexx-modrexx
-CONF=/etc/apache2/conf-available/oorexx-modrexx.conf
+LAB=/var/www/html/modrexx
+CONF=/etc/apache2/conf-available/modrexx.conf
 LOG=/var/log/apache2/error.log
-URL=/oorexx-modrexx
+URL=/modrexx
 BASE=http://127.0.0.1$URL
 TMP=$(mktemp -d)
 FAILS=0
@@ -41,13 +41,13 @@ echo hello > "$LAB/static.txt"
 chmod -R a+rX "$LAB"
 {
     echo "<Directory \"$LAB\">"
-    echo "    AddHandler oorexx-modrexx .rex"
-    echo "    OoRexxSetVar ExampleVar \"Hello world\""
-    echo "    OoRexxSetVar EXAMPLEVAR2 \"Second one\""
+    echo "    AddHandler rexx-handler .rex"
+    echo "    RexxSetVar ExampleVar \"Hello world\""
+    echo "    RexxSetVar EXAMPLEVAR2 \"Second one\""
     echo "    Require all granted"
     echo "</Directory>"
 } > "$CONF"
-a2enconf oorexx-modrexx >/dev/null
+a2enconf modrexx >/dev/null
 apachectl -k graceful; sleep 2
 : > "$LOG"
 
@@ -127,7 +127,7 @@ check "nothing else in the error log" \
       "$(grep -v -E ':notice\]|respond.rex: line 22: Error 41|Access to /the/file' "$LOG" | wc -l)" 0
 
 echo "== Cleanup"
-a2disconf oorexx-modrexx >/dev/null
+a2disconf modrexx >/dev/null
 rm -f "$CONF"
 rm -rf "$LAB" "$TMP"
 apachectl -k graceful; sleep 1

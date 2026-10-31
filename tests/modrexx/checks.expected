@@ -5,7 +5,7 @@ WWWSrvRecPort(r) -> Error 40.1
 WWWSrvRecPort(s) -> [80]
 WWWCnxRecAborted(s) -> Error 40.1
 WWWCnxRecAborted(c) -> [0]
-WWWReqRecUri(r,) -> [/oorexx-modrexx/checks.rex]
+WWWReqRecUri(r,) -> [/modrexx/checks.rex]
 WWWReqRecNext(r) -> [(nil)]
 WWWReqRecNext(s) -> Error 40.1
 WWWSub_Req_Lookup_URI(r, "/") -> Error 43.1
