@@ -213,11 +213,23 @@ RexxRoutine0(int, oorx_more)
     return fill_in(OORX_CHUNK) ? 1 : 0;
 }
 
+/* The routines of the APACHE environment (below, after the snapshot).    */
+REXX_TYPED_ROUTINE_PROTOTYPE(oorx_field);
+REXX_TYPED_ROUTINE_PROTOTYPE(oorx_entries);
+REXX_TYPED_ROUTINE_PROTOTYPE(oorx_table);
+REXX_TYPED_ROUTINE_PROTOTYPE(oorx_update);
+REXX_TYPED_ROUTINE_PROTOTYPE(oorx_logl);
+
 static RexxRoutineEntry host_routines[] = {
     REXX_TYPED_ROUTINE(oorx_log,      oorx_log),
     REXX_TYPED_ROUTINE(oorx_read,     oorx_read),
     REXX_TYPED_ROUTINE(oorx_readline, oorx_readline),
     REXX_TYPED_ROUTINE(oorx_more,     oorx_more),
+    REXX_TYPED_ROUTINE(oorx_field,    oorx_field),
+    REXX_TYPED_ROUTINE(oorx_entries,  oorx_entries),
+    REXX_TYPED_ROUTINE(oorx_table,    oorx_table),
+    REXX_TYPED_ROUTINE(oorx_update,   oorx_update),
+    REXX_TYPED_ROUTINE(oorx_logl,     oorx_logl),
     REXX_LAST_ROUTINE()
 };
 
@@ -350,14 +362,27 @@ static bool wd_disarm(void)
 /* order, for the plugin.                                                   */
 /* ------------------------------------------------------------------------ */
 
-/* Case-insensitive keys, as in Apache's tables.                            */
-struct nocase {
-    bool operator()(const std::string &a, const std::string &b) const
-    { return strcasecmp(a.c_str(), b.c_str()) < 0; }
-};
-/* Several entries may share a name; the first is the one apr_table_get     */
-/* gives, and a multimap keeps equal keys in the order they came.           */
-typedef std::multimap<std::string, std::string, nocase> table;
+/* A table as Apache keeps it: entries in their order, names as they were  */
+/* written, several entries with one name; names compare without case. The  */
+/* first entry with a name is the one apr_table_get gives.                  */
+typedef std::vector<std::pair<std::string, std::string> > table;
+
+static bool same_name(const std::string &a, const char *b) { return !strcasecmp(a.c_str(), b); }
+
+/* apr_table_set, apr_table_add and apr_table_unset, on our copy: set keeps */
+/* the first entry (and its name as written) with the new value, and drops  */
+/* the others.                                                              */
+static void table_apply(table &t, char action, const std::string &k, const std::string &v)
+{
+    bool kept = false;
+    if (action == 'a') { t.push_back(std::make_pair(k, v)); return; }
+    for (table::iterator e = t.begin(); e != t.end(); ) {
+        if (!same_name(e->first, k.c_str())) { ++e; continue; }
+        if (action == 's' && !kept) { e->second = v; kept = true; ++e; continue; }
+        e = t.erase(e);
+    }
+    if (action == 's' && !kept) t.push_back(std::make_pair(k, v));
+}
 
 struct snap_request {
     std::map<std::string, std::string> r;   /* fields                       */
@@ -395,7 +420,7 @@ static void snap_load(const std::string &k, const std::string &v)
     if (g_snap.req.size() <= q) g_snap.req.resize(q + 1);
     if (kind == 'r') { g_snap.req[q].r[name] = v; return; }
     int t = table_index(kind);
-    if (t >= 0) g_snap.req[q].t[t].insert(std::make_pair(name, v));
+    if (t >= 0) g_snap.req[q].t[t].push_back(std::make_pair(name, v));
 }
 
 static void send_update(const char *op, const std::string &key, const std::string &val)
@@ -426,10 +451,12 @@ static const char *api_table_get(int q, char t, const char *key, size_t *len)
     int i = table_index(t);
     if (i < 0 || q < 0 || (size_t)q >= g_snap.req.size()) return NULL;
     const table &tb = g_snap.req[q].t[i];
-    table::const_iterator e = tb.lower_bound(key);
-    if (e == tb.end() || strcasecmp(e->first.c_str(), key)) return NULL;
-    if (len) *len = e->second.size();
-    return e->second.c_str();
+    for (table::const_iterator e = tb.begin(); e != tb.end(); ++e)
+        if (same_name(e->first, key)) {
+            if (len) *len = e->second.size();
+            return e->second.c_str();
+        }
+    return NULL;
 }
 
 static void api_table_each(int q, char t, void *ctx, orx_kv_fn *fn)
@@ -463,6 +490,8 @@ static const char *op_field(char op)
     case 'H': return "handler";       case 'G': return "content_languages";
     case 'U': return "uri";           case 'F': return "filename";
     case 'P': return "path_info";     case 'Q': return "args";
+    case 'K': return "content_languages";
+    case 'R': return "user";
     }
     return NULL;
 }
@@ -473,11 +502,8 @@ static void api_update(const char *op, const char *key, const char *value, size_
     if (op[0] != '+' && oorx_op_index(op) >= 0) {
         if (g_snap.req.empty()) g_snap.req.resize(1);
         snap_request &s = g_snap.req[0];
-        if (op[1]) {
-            table &t = s.t[table_index(op[1])];
-            if (op[0] == 's' || op[0] == 'u') t.erase(k);
-            if (op[0] == 's' || op[0] == 'a') t.insert(std::make_pair(k, v));
-        } else if (const char *f = op_field(op[0])) {
+        if (op[1]) table_apply(s.t[table_index(op[1])], op[0], k, v);
+        else if (const char *f = op_field(op[0])) {
             std::string &cur = s.r[f];
             if (op[0] == 'G') cur = cur.empty() ? v : cur + "," + v;   /* a list */
             else cur = v;
@@ -502,6 +528,77 @@ static const orx_host_api g_api = {
     api_field, api_table_get, api_table_each, api_related, api_client_each,
     api_update, api_log, api_read_body
 };
+
+/* ------------------------------------------------------------------------ */
+/* The APACHE environment of a native program (Address APACHE)              */
+/*                                                                          */
+/* The environment itself is written in Rexx (host/apache.rex, built in as  */
+/* apache_src): a .CommandHandler, registered in the instance of every      */
+/* phase of a native program. These routines are all it needs from here:   */
+/* reading the snapshot, sending a change, and logging at a level.          */
+/* ------------------------------------------------------------------------ */
+
+#include "../build/apache_src.h"
+
+/* The anchor loads the package once, and keeps its class (a global        */
+/* reference): every phase of a native program registers an instance of it. */
+static RexxObjectPtr g_apache_class = NULLOBJECT;
+static const char apache_register_src[] =
+    "use strict arg class, phase\n"
+    ".CommandHandler~register('APACHE', class~new(phase))\n";
+
+/* A field of request q, or .nil if q is not in the snapshot.               */
+RexxRoutine2(RexxObjectPtr, oorx_field, wholenumber_t, q, CSTRING, name)
+{
+    size_t n = 0;
+    const char *v = api_field((int)q, name, &n);
+    if (v) return context->NewString(v, n);
+    if (q >= 0 && (size_t)q < g_snap.req.size()) return context->NullString();
+    return context->Nil();
+}
+
+/* The values of the entries named key of table t of request q, in order.   */
+RexxRoutine3(RexxArrayObject, oorx_entries, wholenumber_t, q, CSTRING, t, CSTRING, key)
+{
+    RexxArrayObject a = context->NewArray(0);
+    int i = table_index(t[0]);
+    if (i < 0 || t[1] || q < 0 || (size_t)q >= g_snap.req.size()) return a;
+    const table &tb = g_snap.req[q].t[i];
+    for (table::const_iterator e = tb.begin(); e != tb.end(); ++e)
+        if (same_name(e->first, key))
+            context->ArrayAppend(a, context->NewString(e->second.data(), e->second.size()));
+    return a;
+}
+
+/* Every entry of table t of request q, in order: name, value, name...      */
+RexxRoutine2(RexxArrayObject, oorx_table, wholenumber_t, q, CSTRING, t)
+{
+    RexxArrayObject a = context->NewArray(0);
+    int i = table_index(t[0]);
+    if (i < 0 || t[1] || q < 0 || (size_t)q >= g_snap.req.size()) return a;
+    const table &tb = g_snap.req[q].t[i];
+    for (table::const_iterator e = tb.begin(); e != tb.end(); ++e) {
+        context->ArrayAppend(a, context->NewString(e->first.data(), e->first.size()));
+        context->ArrayAppend(a, context->NewString(e->second.data(), e->second.size()));
+    }
+    return a;
+}
+
+/* A core operation (the handler has checked it): the snapshot changes, and */
+/* the module applies it.                                                   */
+RexxRoutine3(int, oorx_update, CSTRING, op, CSTRING, key, RexxStringObject, value)
+{
+    api_update(op, key, context->StringData(value), context->StringLength(value));
+    return 0;
+}
+
+/* A line for the error log at an APLOG_* level (0..15: trace8 is 15).     */
+RexxRoutine2(int, oorx_logl, wholenumber_t, level, RexxStringObject, s)
+{
+    if (level < 0 || level > 15) level = OORX_LOG_ERR;
+    send_log((int)level, context->StringData(s), context->StringLength(s));
+    return 0;
+}
 
 /* ------------------------------------------------------------------------ */
 /* Serving one connection                                                   */
@@ -662,6 +759,32 @@ static void serve(int fd)
                                                pol.output_to_log ? tc->True() : tc->False());
         out = tc->CallRoutine(boot, bargs);
     }
+    /* A native program talks to Apache through Address APACHE: the        */
+    /* environment's package is the anchor's, already loaded.              */
+    if (klass == OORX_CLASS_NATIVE && out != NULLOBJECT && !tc->CheckCondition()) {
+        RexxRoutineObject env = tc->NewRoutine("oorexx-host APACHE registration",
+                                               apache_register_src, sizeof apache_register_src - 1);
+        if (env == NULLOBJECT || tc->CheckCondition() ||
+            (tc->CallRoutine(env, tc->ArrayOfTwo(g_apache_class, tc->WholeNumber(phase))),
+             tc->CheckCondition())) {
+            RexxCondition c;
+            RexxDirectoryObject ci = tc->GetConditionInfo();
+            std::string m = "oorexx-host: the APACHE environment failed";
+            if (ci != NULLOBJECT) {
+                tc->DecodeConditionInfo(ci, &c);
+                char n[64];
+                snprintf(n, sizeof n, ": line %d: Error %d", (int)c.position, (int)c.rc);
+                m += n;
+                if (c.message != NULLOBJECT) { m += ": "; m += tc->CString(c.message); }
+            }
+            send_log(OORX_LOG_ERR, m.data(), m.size());
+            /* Close the program's output, or the pump never sees its end.  */
+            tc->ClearCondition();
+            tc->SendMessage0(out, "CLOSE");
+            tc->ClearCondition();
+            out = NULLOBJECT;
+        }
+    }
     if (out == NULLOBJECT || tc->CheckCondition()) {
         tc->ClearCondition();
         logf_conn("oorexx-host: bootstrap failed%s", "");
@@ -804,11 +927,20 @@ static bool load_plugin(const char *spec)
 static void load_anchor(void)
 {
     RexxInstance *inst; RexxThreadContext *tc;
-    if (!RexxCreateInterpreter(&inst, &tc, NULL)) {
-        fprintf(stderr, "oorexx-host: cannot create the preload instance\n");
+    RexxLibraryPackage lib = { "OORXHOST", &host_package };
+    RexxOption opts[2];
+    opts[0].optionName = REGISTER_LIBRARY; opts[0].option = (void *)&lib;
+    opts[1].optionName = NULL;
+    if (!RexxCreateInterpreter(&inst, &tc, opts)) {
+        fprintf(stderr, "oorexx-host: cannot create the anchor instance\n");
         _exit(EXIT_CONFIG);
     }
-    std::string src = "return\n";
+    /* The APACHE environment of native programs (its class is what this    */
+    /* returns); and the preloaded packages, required.                      */
+    std::string src = "use strict arg apache\n"
+                      "p = .Package~new('oorexx-host: the APACHE environment',"
+                      " apache~makeArray('0a'x))\n"
+                      "return p~findClass('OoRexxApache')\n";
     for (size_t i = 0; i < g_preload.size(); i++) {
         std::string q;
         for (char ch : g_preload[i]) { q += ch; if (ch == '"') q += '"'; }
@@ -817,10 +949,16 @@ static void load_anchor(void)
     RexxRoutineObject r = tc->NewRoutine("oorexx-host preload", src.data(), src.size());
     /* Held for good: the routine keeps the packages it required loaded.  */
     if (r != NULLOBJECT) tc->RequestGlobalReference(r);
-    if (r != NULLOBJECT && !tc->CheckCondition()) tc->CallRoutine(r, NULL);
-    if (r == NULLOBJECT || tc->CheckCondition()) {
+    if (r != NULLOBJECT && !tc->CheckCondition()) {
+        g_apache_class = tc->CallRoutine(r, tc->ArrayOfOne(tc->NewString(apache_src,
+                                                                          sizeof apache_src - 1)));
+        if (g_apache_class != NULLOBJECT && !tc->CheckCondition())
+            tc->RequestGlobalReference(g_apache_class);
+    }
+    if (r == NULLOBJECT || g_apache_class == NULLOBJECT || tc->CheckCondition()) {
         RexxCondition c;
-        std::string m = "oorexx-host: OoRexxPreload failed";
+        std::string m = g_preload.empty() ? "oorexx-host: the anchor instance failed"
+                                          : "oorexx-host: OoRexxPreload failed";
         RexxDirectoryObject ci = tc->GetConditionInfo();
         if (ci != NULLOBJECT) {
             tc->DecodeConditionInfo(ci, &c);
@@ -853,13 +991,9 @@ static void child_main(int me, pid_t master, int lsock, int stopfd, int max_requ
     pthread_t t;
     pthread_create(&t, NULL, watchdog, NULL);
 
-    /* Pre-warm: the first instance of a process is the expensive one.      */
-    /* With --preload, the anchor is that first instance, and it stays.     */
-    if (!g_preload.empty()) load_anchor();
-    else {
-        RexxInstance *inst; RexxThreadContext *tc;
-        if (RexxCreateInterpreter(&inst, &tc, NULL)) inst->Terminate();
-    }
+    /* The anchor: the first instance of the process (the expensive one),   */
+    /* which stays, with the APACHE environment and the preloaded packages. */
+    load_anchor();
     if (!slot_cas(me, SLOT_STARTING, SLOT_IDLE)) _exit(0);
 
     bool draining = false;

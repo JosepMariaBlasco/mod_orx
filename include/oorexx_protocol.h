@@ -105,6 +105,9 @@ static const char *const oorx_ops[] = {
     "si", "so", "sx", "se", "sn",
     "ai", "ao", "ax", "ae", "an",
     "ui", "uo", "ux", "ue", "un",
+    "K",                            /* content_languages: the whole list, */
+                                    /* comma separated ("" = none)        */
+    "R",                            /* user                               */
     NULL
 };
 #define OORX_ALLOW_ALL 0xFFFFFFFFu

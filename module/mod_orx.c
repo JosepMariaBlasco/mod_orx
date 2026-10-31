@@ -872,7 +872,7 @@ static void vars_request(orx_vars *v, const char *pre, request_rec *r)
     vars_put(v, pre, 'r', "user", r->user);
     vars_put(v, pre, 'r', "auth_type", r->ap_auth_type);
     vars_put(v, pre, 'r', "useragent_ip", r->useragent_ip);
-    vars_put(v, pre, 'r', "server_name", ap_get_server_name(r));
+    vars_put(v, pre, 'r', "server_name", ap_get_server_name_for_url(r));
     vars_put(v, pre, 'r', "server_port", apr_itoa(r->pool, ap_get_server_port(r)));
     vars_put(v, pre, 'r', "next", rel_index(v, r->next));
     vars_put(v, pre, 'r', "prev", rel_index(v, r->prev));
@@ -1110,6 +1110,18 @@ static void apply_update(oorx_conn *c, const char *op, const char *key, const ch
             r->content_languages = apr_array_make(r->pool, 1, sizeof(const char *));
         *(const char **)apr_array_push(r->content_languages) = v;
         break;
+    case 'K': {
+        /* The whole list, comma separated: "" is none.                     */
+        char *last, *w, *list = apr_pstrdup(r->pool, v);
+        r->content_languages = NULL;
+        for (w = apr_strtok(list, ", \t", &last); w; w = apr_strtok(NULL, ", \t", &last)) {
+            if (!r->content_languages)
+                r->content_languages = apr_array_make(r->pool, 2, sizeof(const char *));
+            *(const char **)apr_array_push(r->content_languages) = w;
+        }
+        break;
+    }
+    case 'R': r->user = (char *)v; break;
     case 'U': r->uri = (char *)v; break;
     case 'F': r->filename = (char *)v; break;
     case 'P': r->path_info = (char *)v; break;
@@ -1207,6 +1219,23 @@ static int oorx_cgi_handler(request_rec *r)
 /* Run one hook phase. Returns the status in RESULT (0 = the program ran),   */
 /* or -1 if the host could not be reached or the connection broke; *value   */
 /* is what the program returned, or NULL if it returned nothing.            */
+/* The core operations a native program may send in each phase: what the   */
+/* APACHE environment allows (host/apache.rex), checked again here.         */
+static apr_uint32_t native_allow(int phase)
+{
+    static const char *const env_notes[] = { "se", "ae", "ue", "sn", "an", "un", NULL };
+    apr_uint32_t m = 0;
+    int i;
+    switch (phase) {
+    case OORX_PHASE_AUTHN:
+    case OORX_PHASE_AUTHZ:
+        for (i = 0; env_notes[i]; i++) m |= 1u << oorx_op_index(env_notes[i]);
+        return m;
+    default:                                  /* LOG: nothing               */
+        return 0;
+    }
+}
+
 static int run_hook(request_rec *r, int phase, const char *program,
                     const char **args, int nargs, const char **value)
 {
@@ -1221,8 +1250,9 @@ static int run_hook(request_rec *r, int phase, const char *program,
     ph.klass = OORX_CLASS_NATIVE;
     ph.program = program;
     ph.has_args = 1; ph.args = args; ph.nargs = nargs;
-    ph.vars = orx_vars_new(r, ORX_VARS_ENV);
+    ph.vars = orx_vars_new(r, ORX_VARS_ENV | ORX_VARS_REQUEST);
     ph.body = ORX_BODY_NONE;
+    ph.allow = native_allow(phase);
     if (orx_phase_open(r, &ph, &c) != OK) return -1;
     orx_phase_discard(c);                /* a hook's output went to the log */
     if (!c->done) {

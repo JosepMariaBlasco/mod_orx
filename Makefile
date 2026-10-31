@@ -36,7 +36,14 @@ build/config.h: Makefile
 
 host: build/oorexx-host
 
-build/oorexx-host: host/oorexx-host.cpp include/oorexx_protocol.h include/orx_host_plugin.h
+# The APACHE environment, written in Rexx, built into the host as a string.
+build/apache_src.h: host/apache.rex
+	mkdir -p build
+	{ echo 'static const char apache_src[] = R"orx_rexx('; cat host/apache.rex; \
+	  echo ')orx_rexx";'; } > $@
+
+build/oorexx-host: host/oorexx-host.cpp include/oorexx_protocol.h include/orx_host_plugin.h \
+                   build/apache_src.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -o $@ host/oorexx-host.cpp $(OOREXX_FLAGS) -lpthread -ldl
 
