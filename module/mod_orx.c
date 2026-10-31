@@ -626,6 +626,7 @@ typedef struct {
     uint32_t     status;       /* from RESULT */
     const char  *value;        /* from RESULT: what the program returned, */
                                /* or NULL if it returned nothing           */
+    int          drop;         /* from now on, the output goes nowhere     */
     const char  *redirect;     /* modrexx: WWWInternal_Redirect's URI      */
 } oorx_conn;
 
@@ -817,20 +818,127 @@ static void append_kv(apr_pool_t *p, char **buf, apr_size_t *len, apr_size_t *ca
     append_str(p, buf, len, cap, v, vl);
 }
 
+/* An environment ("NAME=value" strings, as ap_create_environment makes it) */
+/* as a table on the wire.                                                  */
+static void append_env(apr_pool_t *p, char **env, char **buf, apr_size_t *len,
+                       apr_size_t *cap)
+{
+    int i;
+    for (i = 0; env[i]; i++) {
+        const char *eq = strchr(env[i], '=');
+        if (!eq) continue;
+        append_kv(p, buf, len, cap, env[i], eq - env[i], eq + 1, strlen(eq + 1));
+    }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Running one phase in the host                                            */
+/*                                                                          */
+/* Every class of program runs a phase in the same way: connect, send BEGIN, */
+/* the arguments (ARGS) if there are any and VARS, then pump frames until   */
+/* RESULT. What changes from one caller to another is what it sends, how    */
+/* the request body is offered, where the output goes and what it makes of  */
+/* the result. phase_open takes the first two; phase_stream (to the client) */
+/* and discard_output (nowhere) are the two places the output can go; and   */
+/* the caller reads the result in the connection (done, status, value).     */
+/* ------------------------------------------------------------------------ */
+
+/* How the request body is offered to the program.                          */
+enum { BODY_NONE,       /* no body: every READ is answered with EOF          */
+       BODY_EAGER,      /* set up before connecting (the content phase)      */
+       BODY_LAZY };     /* set up on the first READ, if the program asks     */
+
+typedef struct {
+    int         phase;          /* OORX_PHASE_*                              */
+    int         klass;          /* OORX_CLASS_*                              */
+    const char *program;
+    int         has_args;       /* send an ARGS frame (it may be empty)      */
+    const char *args;           /* its payload                               */
+    apr_size_t  alen;
+    const char *vars;           /* the VARS payload                          */
+    apr_size_t  vlen;
+    int         body;           /* BODY_*                                    */
+} oorx_phase;
+
+/* With "OoRexxHost none", the socket must be given.                        */
+static int host_configured(request_rec *r)
+{
+    if (g_socket_path) return 1;
+    ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                  "mod_orx: OoRexxHost is none and OoRexxSocket is not set");
+    return 0;
+}
+
+/* Connect to the host and start the phase. Returns OK, with the connection */
+/* in *cp, or the status to answer with: what ap_setup_client_block said,   */
+/* or 503 if the host cannot be reached (both are logged).                  */
+static int phase_open(request_rec *r, const oorx_phase *ph, oorx_conn **cp)
+{
+    oorx_dir_cfg *dcfg = ap_get_module_config(r->per_dir_config, &orx_module);
+    int timeout = dcfg->timeout > 0 ? dcfg->timeout : DEFAULT_TIMEOUT;
+    oorx_conn *c;
+    char *begin;
+    apr_size_t plen;
+    int ret;
+
+    *cp = NULL;
+    if (ph->body == BODY_EAGER &&
+        (ret = ap_setup_client_block(r, REQUEST_CHUNKED_DECHUNK)) != OK)
+        return ret;
+
+    c = apr_pcalloc(r->pool, sizeof *c);
+    c->r = r;
+    c->fd = connect_host(r, g_socket_path, timeout);
+    if (c->fd < 0) return HTTP_SERVICE_UNAVAILABLE;
+    apr_pool_cleanup_register(r->pool, (void *)(apr_uintptr_t)c->fd, close_fd,
+                              apr_pool_cleanup_null);
+    if (ph->body == BODY_EAGER) c->has_body = ap_should_client_block(r);
+    else if (ph->body == BODY_LAZY) c->lazy_body = 1;
+
+    plen = strlen(ph->program);
+    begin = apr_palloc(r->pool, 7 + plen);
+    begin[0] = OORX_PROTOCOL_VERSION;
+    begin[1] = (char)ph->phase;
+    begin[2] = (char)ph->klass;
+    oorx_put_u32((unsigned char *)begin + 3, (uint32_t)timeout);
+    memcpy(begin + 7, ph->program, plen);
+    if (oorx_send(c->fd, OORX_BEGIN, 0, begin, (uint32_t)(7 + plen)) < 0 ||
+        (ph->has_args && oorx_send(c->fd, OORX_ARGS, 0, ph->args, (uint32_t)ph->alen) < 0) ||
+        oorx_send(c->fd, OORX_VARS, 0, ph->vars, (uint32_t)ph->vlen) < 0) {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r, "mod_orx: cannot talk to oorexx-host");
+        return HTTP_SERVICE_UNAVAILABLE;
+    }
+    *cp = c;
+    return OK;
+}
+
+/* The output, to the client as it comes, until the phase ends: what is    */
+/* already buffered first, then each DATA frame, flushed when the host asks. */
+/* Once c->drop is set, the output goes nowhere.                            */
+static void phase_stream(oorx_conn *c)
+{
+    for (;;) {
+        if (c->pos < c->len) {
+            if (!c->drop) ap_rwrite(c->buf + c->pos, (int)(c->len - c->pos), c->r);
+            c->pos = c->len;
+        }
+        if (c->flush && !c->drop) ap_rflush(c->r);
+        c->flush = 0;
+        if (!pump(c)) break;
+    }
+}
+
 static int oorx_cgi_handler(request_rec *r)
 {
-    oorx_dir_cfg *dcfg;
     oorx_conn *c;
-    char **env, *vars = NULL, *begin;
-    apr_size_t vlen = 0, vcap = 0, plen;
-    int timeout, ret, i;
+    oorx_phase ph;
+    char *vars = NULL;
+    apr_size_t vlen = 0, vcap = 0;
+    int ret;
     char sbuf[MAX_STRING_LEN];
     const char *location;
 
     if (strcmp(r->handler, "oorexx-cgi")) return DECLINED;
-
-    dcfg = ap_get_module_config(r->per_dir_config, &orx_module);
-    timeout = dcfg->timeout > 0 ? dcfg->timeout : DEFAULT_TIMEOUT;
 
     /* The same preconditions as mod_cgi, with the same answers. */
     if (!(ap_allow_options(r) & OPT_EXECCGI)) {
@@ -853,44 +961,21 @@ static int oorx_cgi_handler(request_rec *r)
                       "mod_orx: attempt to invoke directory as script: %s", r->filename);
         return HTTP_FORBIDDEN;
     }
-    if (!g_socket_path) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-                      "mod_orx: OoRexxHost is none and OoRexxSocket is not set");
-        return HTTP_INTERNAL_SERVER_ERROR;
-    }
+    if (!host_configured(r)) return HTTP_INTERNAL_SERVER_ERROR;
 
     /* The CGI environment, exactly as mod_cgi builds it. */
     ap_add_common_vars(r);
     ap_add_cgi_vars(r);
-    env = ap_create_environment(r->pool, r->subprocess_env);
-    for (i = 0; env[i]; i++) {
-        const char *eq = strchr(env[i], '=');
-        if (!eq) continue;
-        append_kv(r->pool, &vars, &vlen, &vcap, env[i], eq - env[i], eq + 1, strlen(eq + 1));
-    }
+    append_env(r->pool, ap_create_environment(r->pool, r->subprocess_env),
+               &vars, &vlen, &vcap);
 
-    if ((ret = ap_setup_client_block(r, REQUEST_CHUNKED_DECHUNK)) != OK) return ret;
-
-    c = apr_pcalloc(r->pool, sizeof *c);
-    c->r = r;
-    c->fd = connect_host(r, g_socket_path, timeout);
-    if (c->fd < 0) return HTTP_SERVICE_UNAVAILABLE;
-    apr_pool_cleanup_register(r->pool, (void *)(apr_uintptr_t)c->fd, close_fd,
-                              apr_pool_cleanup_null);
-    c->has_body = ap_should_client_block(r);
-
-    plen = strlen(r->filename);
-    begin = apr_palloc(r->pool, 7 + plen);
-    begin[0] = OORX_PROTOCOL_VERSION;
-    begin[1] = OORX_PHASE_CONTENT;
-    begin[2] = OORX_CLASS_CGI;
-    oorx_put_u32((unsigned char *)begin + 3, (uint32_t)timeout);
-    memcpy(begin + 7, r->filename, plen);
-    if (oorx_send(c->fd, OORX_BEGIN, 0, begin, (uint32_t)(7 + plen)) < 0 ||
-        oorx_send(c->fd, OORX_VARS, 0, vars, (uint32_t)vlen) < 0) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r, "mod_orx: cannot talk to oorexx-host");
-        return HTTP_SERVICE_UNAVAILABLE;
-    }
+    memset(&ph, 0, sizeof ph);
+    ph.phase = OORX_PHASE_CONTENT;
+    ph.klass = OORX_CLASS_CGI;
+    ph.program = r->filename;
+    ph.vars = vars; ph.vlen = vlen;
+    ph.body = BODY_EAGER;
+    if ((ret = phase_open(r, &ph, &c)) != OK) return ret;
 
     /* Headers: Apache's own CGI header parser, as mod_cgi uses. */
     ret = ap_scan_script_header_err_core_ex(r, sbuf, getsfunc_host, c, APLOG_MODULE_INDEX);
@@ -915,14 +1000,7 @@ static int oorx_cgi_handler(request_rec *r)
     }
 
     /* Body: what was buffered past the headers, then the rest as it comes. */
-    for (;;) {
-        if (c->pos < c->len) {
-            ap_rwrite(c->buf + c->pos, (int)(c->len - c->pos), r);
-            c->pos = c->len;
-        }
-        if (c->flush) { ap_rflush(r); c->flush = 0; }
-        if (!pump(c)) break;
-    }
+    phase_stream(c);
     if (c->failed && !c->done)
         ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r,
                       "mod_orx: connection to oorexx-host lost before the end of %s",
@@ -1153,7 +1231,7 @@ static void apply_update(oorx_conn *c, const char *op, const char *key, const ch
     case 'x': apr_table_set(r->err_headers_out, key, v); break;
     case 'e': apr_table_set(r->subprocess_env, key, v); break;
     case 'n': apr_table_set(r->notes, key, v); break;
-    case 'R': c->redirect = v; break;
+    case 'R': c->redirect = v; c->drop = 1; break;
     default:
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
                       "mod_orx: unknown update \"%s\" from oorexx-host", op);
@@ -1188,58 +1266,25 @@ static int modrexx_status(const char *value)
 static int modrexx_run(request_rec *r, int phase, const char *program,
                        apr_array_header_t *setvars, int content)
 {
-    oorx_dir_cfg *dcfg = ap_get_module_config(r->per_dir_config, &orx_module);
-    int timeout = dcfg->timeout > 0 ? dcfg->timeout : DEFAULT_TIMEOUT;
     oorx_conn *c;
-    char *vars, *begin;
-    apr_size_t vlen, plen;
+    oorx_phase ph;
     int ret;
 
-    if (!g_socket_path) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-                      "mod_orx: OoRexxHost is none and OoRexxSocket is not set");
-        return HTTP_INTERNAL_SERVER_ERROR;
-    }
-    vars = modrexx_snapshot(r, setvars, &vlen);
-    if (content && (ret = ap_setup_client_block(r, REQUEST_CHUNKED_DECHUNK)) != OK)
-        return ret;
-
-    c = apr_pcalloc(r->pool, sizeof *c);
-    c->r = r;
-    c->fd = connect_host(r, g_socket_path, timeout);
-    if (c->fd < 0) return HTTP_SERVICE_UNAVAILABLE;
-    apr_pool_cleanup_register(r->pool, (void *)(apr_uintptr_t)c->fd, close_fd,
-                              apr_pool_cleanup_null);
-    if (content) c->has_body = ap_should_client_block(r);
-    else c->lazy_body = 1;
-
-    plen = strlen(program);
-    begin = apr_palloc(r->pool, 7 + plen);
-    begin[0] = OORX_PROTOCOL_VERSION;
-    begin[1] = (char)phase;
-    begin[2] = OORX_CLASS_MODREXX;
-    oorx_put_u32((unsigned char *)begin + 3, (uint32_t)timeout);
-    memcpy(begin + 7, program, plen);
-    if (oorx_send(c->fd, OORX_BEGIN, 0, begin, (uint32_t)(7 + plen)) < 0 ||
-        oorx_send(c->fd, OORX_VARS, 0, vars, (uint32_t)vlen) < 0) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r, "mod_orx: cannot talk to oorexx-host");
-        return HTTP_SERVICE_UNAVAILABLE;
-    }
+    if (!host_configured(r)) return HTTP_INTERNAL_SERVER_ERROR;
+    memset(&ph, 0, sizeof ph);
+    ph.phase = phase;
+    ph.klass = OORX_CLASS_MODREXX;
+    ph.program = program;
+    ph.vars = modrexx_snapshot(r, setvars, &ph.vlen);
+    ph.body = content ? BODY_EAGER : BODY_LAZY;
+    if ((ret = phase_open(r, &ph, &c)) != OK) return ret;
 
     /* The output is the body, as it comes; status and headers are what    */
     /* the program set. Apache holds a small response until the end, so    */
     /* what the program returns can still replace it (an error, say), as   */
-    /* under mod_rexx.                                                     */
+    /* under mod_rexx. After WWWInternal_Redirect, it goes nowhere.         */
     if (!content) discard_output(c);
-    else for (;;) {
-        if (c->pos < c->len) {
-            if (!c->redirect) ap_rwrite(c->buf + c->pos, (int)(c->len - c->pos), r);
-            c->pos = c->len;
-        }
-        if (c->flush && !c->redirect) ap_rflush(r);
-        c->flush = 0;
-        if (!pump(c)) break;
-    }
+    else phase_stream(c);
     if (!c->done) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r,
                       "mod_orx: connection to oorexx-host lost while running %s", program);
@@ -1332,54 +1377,33 @@ MR_HOOK(log,           MR_LOG,           OORX_PHASE_LOG)
 static int run_hook(request_rec *r, int phase, const char *program,
                     const char **args, int nargs, const char **value)
 {
-    oorx_dir_cfg *dcfg = ap_get_module_config(r->per_dir_config, &orx_module);
-    int timeout = dcfg->timeout > 0 ? dcfg->timeout : DEFAULT_TIMEOUT;
     apr_table_t *saved = r->subprocess_env;
-    char **env, *vars = NULL, *abuf = NULL, *begin;
-    apr_size_t vlen = 0, vcap = 0, alen = 0, acap = 0, plen;
+    char *vars = NULL, *abuf = NULL;
+    apr_size_t vlen = 0, vcap = 0, alen = 0, acap = 0;
     oorx_conn *c;
+    oorx_phase ph;
     int i;
 
     *value = NULL;
-    if (!g_socket_path) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-                      "mod_orx: OoRexxHost is none and OoRexxSocket is not set");
-        return -1;
-    }
+    if (!host_configured(r)) return -1;
 
     r->subprocess_env = apr_table_copy(r->pool, saved);
     ap_add_common_vars(r);
     if (r->uri && r->filename) ap_add_cgi_vars(r);
-    env = ap_create_environment(r->pool, r->subprocess_env);
+    append_env(r->pool, ap_create_environment(r->pool, r->subprocess_env),
+               &vars, &vlen, &vcap);
     r->subprocess_env = saved;
-    for (i = 0; env[i]; i++) {
-        const char *eq = strchr(env[i], '=');
-        if (!eq) continue;
-        append_kv(r->pool, &vars, &vlen, &vcap, env[i], eq - env[i], eq + 1, strlen(eq + 1));
-    }
     for (i = 0; i < nargs; i++)
         append_str(r->pool, &abuf, &alen, &acap, args[i], strlen(args[i]));
 
-    c = apr_pcalloc(r->pool, sizeof *c);
-    c->r = r;
-    c->fd = connect_host(r, g_socket_path, timeout);
-    if (c->fd < 0) return -1;
-    apr_pool_cleanup_register(r->pool, (void *)(apr_uintptr_t)c->fd, close_fd,
-                              apr_pool_cleanup_null);
-
-    plen = strlen(program);
-    begin = apr_palloc(r->pool, 7 + plen);
-    begin[0] = OORX_PROTOCOL_VERSION;
-    begin[1] = (char)phase;
-    begin[2] = OORX_CLASS_NATIVE;
-    oorx_put_u32((unsigned char *)begin + 3, (uint32_t)timeout);
-    memcpy(begin + 7, program, plen);
-    if (oorx_send(c->fd, OORX_BEGIN, 0, begin, (uint32_t)(7 + plen)) < 0 ||
-        oorx_send(c->fd, OORX_ARGS, 0, abuf, (uint32_t)alen) < 0 ||
-        oorx_send(c->fd, OORX_VARS, 0, vars, (uint32_t)vlen) < 0) {
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r, "mod_orx: cannot talk to oorexx-host");
-        return -1;
-    }
+    memset(&ph, 0, sizeof ph);
+    ph.phase = phase;
+    ph.klass = OORX_CLASS_NATIVE;
+    ph.program = program;
+    ph.has_args = 1; ph.args = abuf; ph.alen = alen;
+    ph.vars = vars; ph.vlen = vlen;
+    ph.body = BODY_NONE;
+    if (phase_open(r, &ph, &c) != OK) return -1;
     discard_output(c);                   /* a hook's output went to the log */
     if (!c->done) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, errno, r,
