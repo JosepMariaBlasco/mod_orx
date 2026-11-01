@@ -33,7 +33,11 @@ jobs:
           curl -sSfL -o "$RUNNER_TEMP/rexxhttp.zip" https://rexx.epbcn.com/rexxhttp/rexxhttp-latest.zip
           mkdir -p "$RUNNER_TEMP/rexxhttp"
           unzip -q "$RUNNER_TEMP/rexxhttp.zip" -d "$RUNNER_TEMP/rexxhttp"
-          echo "::notice title=Linux setup::$(rexx -v | head -1); $(apache2 -v | head -1)"
+          echo "::notice title=Linux setup::$(rexx -v | head -1); $(apache2 -v | head -1); $(nproc) CPUs"
+          # How long an interpreter takes to start here, as root and as Apache's user.
+          t() { s=$(date +%s%N); "$@" > /dev/null 2>&1; echo $(( ($(date +%s%N) - s) / 1000000 ))ms; }
+          echo 'say 1' > /tmp/one.rex; chmod 644 /tmp/one.rex
+          echo "::notice title=rexx start-up::root: $(t rexx /tmp/one.rex) $(t rexx /tmp/one.rex) $(t rexx /tmp/one.rex); www-data: $(t sudo -u www-data rexx /tmp/one.rex) $(t sudo -u www-data rexx /tmp/one.rex) $(t sudo -u www-data rexx /tmp/one.rex); rxapi: $(pgrep -a rxapi | tr '\n' ' ')"
 
       - name: Build and install
         run: |

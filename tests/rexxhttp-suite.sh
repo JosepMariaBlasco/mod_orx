@@ -74,4 +74,11 @@ head -20 /var/log/apache2/error.log | sed 's/^/  log: /'
 RAN=$(grep -c 'Tests ran:' "$OUT")
 BAD=$(grep -E '^(Failures|Errors): +[1-9]' "$OUT" | wc -l)
 rm -f "$OUT"
-[ "$RAN" -ge 1 ] && [ "$BAD" = 0 ] && [ "$LINES" = 0 ]
+if [ "$RAN" -ge 1 ] && [ "$BAD" = 0 ] && [ "$LINES" = 0 ]; then exit 0; fi
+# Not green: what the host's side looks like now.
+SOCK=$(apachectl -t -D DUMP_RUN_CFG 2>/dev/null | sed -n 's/^DefaultRuntimeDir: "\(.*\)"/\1/p')
+echo "  diag: MPM: $(apachectl -V 2>/dev/null | sed -n 's/^Server MPM: *//p')"
+echo "  diag: run-time dir ${SOCK:-?}: $(ls -la "${SOCK:-/var/run/apache2}" 2>&1 | tr '\n' ';')"
+ps -eo pid,ppid,user,etime,args | grep -E '[o]orexx-host|[a]pache2 ' | head -15 | sed 's/^/  diag: /'
+grep -v 'cannot connect to oorexx-host' /var/log/apache2/error.log | head -10 | sed 's/^/  diag: other: /'
+exit 1

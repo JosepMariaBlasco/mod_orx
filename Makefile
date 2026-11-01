@@ -17,6 +17,10 @@ CXXFLAGS      ?= -O2 -Wall
 BINDIR        ?= /usr/local/bin
 PLUGINDIR     ?= /usr/local/lib/mod_orx
 
+# C++11 at least (the host has raw string literals): Apple's clang, for one,
+# does not default to it.
+CXXSTD = -std=c++11
+
 OOREXX_FLAGS = -I$(OOREXX_PREFIX)/include -L$(OOREXX_PREFIX)/lib \
                -Wl,-rpath,$(OOREXX_PREFIX)/lib -lrexx -lrexxapi
 
@@ -45,7 +49,7 @@ build/apache_src.h: host/apache.rex
 build/oorexx-host: host/oorexx-host.cpp include/oorexx_protocol.h include/orx_host_plugin.h \
                    build/apache_src.h
 	mkdir -p build
-	$(CXX) $(CXXFLAGS) -o $@ host/oorexx-host.cpp $(OOREXX_FLAGS) -lpthread -ldl
+	$(CXX) $(CXXSTD) $(CXXFLAGS) -o $@ host/oorexx-host.cpp $(OOREXX_FLAGS) -lpthread -ldl
 
 install: all
 	$(APXS) -i -n orx module/.libs/mod_orx.so
@@ -58,7 +62,7 @@ modrexx/.libs/mod_orx_rexx.so: modrexx/mod_orx_rexx.c include/oorexx_protocol.h 
 
 build/orx_rexx_plugin.so: modrexx/orx_rexx_plugin.cpp include/oorexx_protocol.h include/orx_host_plugin.h
 	mkdir -p build
-	$(CXX) $(CXXFLAGS) -shared -fPIC -o $@ modrexx/orx_rexx_plugin.cpp $(OOREXX_FLAGS)
+	$(CXX) $(CXXSTD) $(CXXFLAGS) -shared -fPIC -o $@ modrexx/orx_rexx_plugin.cpp $(OOREXX_FLAGS)
 
 install-modrexx: modrexx
 	$(APXS) -i -n orx_rexx modrexx/.libs/mod_orx_rexx.so

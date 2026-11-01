@@ -22,7 +22,7 @@ esc() { sed -e 's/%/%25/g' -e 's/\r/%0D/g' | head -40 | awk '{ printf "%s%%0A", 
 if [ $rc = 0 ]; then
     echo "$name: ok (${secs} s) $(tail -1 "$out")" >> "$summary"
 else
-    fails=$(grep -E 'FAIL|Failures:|Errors:|error\.log|^  log: ' "$out")
+    fails=$(grep -E 'FAIL|Failures:|Errors:|error\.log|^  log: |^  diag: |FAIL detail' "$out")
     [ -n "$fails" ] || fails=$(tail -20 "$out")
     echo "::error title=$name failed (rc $rc)::$(echo "$fails" | esc)"
     echo "$name: FAILED rc=$rc (${secs} s)" >> "$summary"
