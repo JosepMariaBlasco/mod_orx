@@ -27,7 +27,15 @@ ok()   { echo "  ok    $1"; }
 fail() { echo "  FAIL  $1"; FAILS=$((FAILS + 1)); }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else fail "$1 (expected '$3', got '$2')"; fi; }
 children_of() { ps -eo pid=,ppid= | awk -v p="$1" '$2 == p { print $1 }'; }
-alive() { n=0; for p in $1; do kill -0 "$p" 2>/dev/null && n=$((n + 1)); done; echo $n; }
+# How many of these processes still run (a zombie, already dead, does not).
+alive() {
+    n=0
+    for p in $1; do
+        s=$(ps -o stat= -p "$p" 2>/dev/null)
+        [ -n "$s" ] && case "$s" in Z*) ;; *) n=$((n + 1)) ;; esac
+    done
+    echo $n
+}
 
 HTTPD=$($APXS -q SBINDIR)/$($APXS -q TARGET)
 MODS=$($APXS -q LIBEXECDIR)

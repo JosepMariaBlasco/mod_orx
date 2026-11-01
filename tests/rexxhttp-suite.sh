@@ -68,7 +68,7 @@ tail -8 "$OUT"
 LINES=$(wc -l < /var/log/apache2/error.log)
 echo "== error.log: $LINES line(s)"
 # Its first lines, if any, to see why without the log file.
-head -20 /var/log/apache2/error.log | sed 's/^/  log: /'
+head -5 /var/log/apache2/error.log | sed 's/^/  log: /'
 # Green: the suite ran (it prints its counts), 0 failures, 0 errors, and an
 # empty error.log.
 RAN=$(grep -c 'Tests ran:' "$OUT")

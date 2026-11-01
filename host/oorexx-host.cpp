@@ -1189,7 +1189,7 @@ int main(int argc, char **argv)
             sigprocmask(SIG_SETMASK, &old, NULL);
             for (;;) {
                 if (waitpid(m, &st, WNOHANG) == m) break;
-                if (g_stop || (0 && getppid() != apache)) { kill(m, SIGTERM); _exit(0); }
+                if (g_stop || getppid() != apache) { kill(m, SIGTERM); _exit(0); }
                 struct pollfd pf = { g_wake[0], POLLIN, 0 };
                 poll(&pf, 1, KEEPER_TICK_MS);
                 char junk[64];

@@ -41,7 +41,11 @@ jobs:
           # How long an interpreter takes to start here, as root and as Apache's user.
           t() { s=$(date +%s%N); "$@" > /dev/null 2>&1; echo $(( ($(date +%s%N) - s) / 1000000 ))ms; }
           echo 'say 1' > /tmp/one.rex; chmod 644 /tmp/one.rex
-          echo "::notice title=rexx start-up::root: $(t rexx /tmp/one.rex) $(t rexx /tmp/one.rex) $(t rexx /tmp/one.rex); www-data: $(t sudo -u www-data rexx /tmp/one.rex) $(t sudo -u www-data rexx /tmp/one.rex) $(t sudo -u www-data rexx /tmp/one.rex); rxapi: $(pgrep -a rxapi | tr '\n' ' ')"
+          echo "::notice title=rexx start-up::root: $(t rexx /tmp/one.rex) $(t rexx /tmp/one.rex) $(t rexx /tmp/one.rex); www-data: $(t sudo -u www-data rexx /tmp/one.rex) $(t sudo -u www-data rexx /tmp/one.rex) $(t sudo -u www-data rexx /tmp/one.rex); rxapi: $(ps -eo pid,user,args | grep '[r]xapi' | tr '\n' ';')"
+          # Each user has an rxapi of its own; if www-data's does not start
+          # by itself, every interpreter it creates waits for it (~2 s).
+          sudo -u www-data sh -c 'rxapi > /tmp/rxapi-www-data.out 2>&1 &'; sleep 2
+          echo "::notice title=rxapi as www-data::started by hand: $(cat /tmp/rxapi-www-data.out 2>&1 | head -5 | tr '\n' ';'); now: $(ps -eo pid,user,args | grep '[r]xapi' | tr '\n' ';'); files: $(ls -la /tmp/.ooRexx* 2>&1 | tr '\n' ';'); start-up: $(t sudo -u www-data rexx /tmp/one.rex) $(t sudo -u www-data rexx /tmp/one.rex); HOME of www-data: $(getent passwd www-data | cut -d: -f6)"
 
       - name: Build and install
         run: |
