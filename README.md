@@ -49,7 +49,10 @@ So mod_orx is two pieces:
 Apache manages the host as mod_cgid manages its daemon. The module binds
 the socket as root, in Apache's run-time directory, so that only Apache's
 `User` can connect to it. It starts `oorexx-host` on that socket, as that
-user and in a process group of its own, and restarts it if it dies. The
+user and in a process group of its own, and restarts it if it dies: at
+once if it had run for a minute; if not, after a wait that doubles every
+time, from 1 s up to 60 s, so that a host that cannot stay up is not
+restarted, and logged, every second. The
 host's first process is a small *keeper*, Apache's only child; the pool's
 master is the keeper's child. Apache's parent
 keeps the socket open the whole time, so requests queue on it while a dead
@@ -390,7 +393,9 @@ preloaded package shares between phases and what a program's own package
 does not, a missing file, and a file that fails to load.
 
 `tests/queue.sh` checks `OoRexxQueueTimeout` and `OoRexxLogQueueTimeout`
-with every host process busy.
+with every host process busy. `tests/restart.sh` checks the wait between
+restarts: a host that dies as it starts, a stop during a wait, and a host
+that had run for a minute (it takes about two minutes).
 `tests/apache.sh` checks `Address APACHE` in the providers and the logging
 hook; `tests/native-phases.sh`, the `OoRexx<Phase>Hook` hooks: the order of
 the phases, every kind of return value, what each phase may change, the

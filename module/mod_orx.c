@@ -96,6 +96,12 @@ module AP_MODULE_DECLARE_DATA orx_module;
 #define DEFAULT_MAX_PROCESSES 8
 #define DEFAULT_MAX_REQUESTS  1000
 #define HOST_EXIT_CONFIG      2     /* oorexx-host: "my configuration is wrong" */
+/* A host that dies is restarted at once if it had run for HOST_STABLE      */
+/* seconds; if not, after a wait that doubles every time, from 1 s up to    */
+/* HOST_MAX_DELAY: a host that cannot stay up is not restarted, and logged, */
+/* every second.                                                            */
+#define HOST_STABLE          60
+#define HOST_MAX_DELAY       60
 #define CONNECT_FIRST_DELAY   apr_time_from_msec(10)
 #define CONNECT_MAX_DELAY     apr_time_from_msec(500)
 #define CONNECT_BUDGET        apr_time_from_sec(5)
@@ -390,6 +396,8 @@ typedef struct {
     server_rec *s;
     apr_pool_t *pool;          /* a subpool of pconf: the registrations      */
     pid_t       parent;        /* Apache's parent process                    */
+    apr_time_t  started;       /* when the current host was exec'd           */
+    int         delay;         /* seconds the next start waits (0: none)     */
 } oorx_gen;
 
 static const char *g_socket_path;   /* what the handler connects to         */
@@ -399,6 +407,7 @@ static void host_maint(int reason, void *data, apr_wait_t status);
 
 static int start_host(oorx_gen *g)
 {
+    int delay = g->delay;
     pid_t pid = fork();
     if (pid < 0) {
         ap_log_error(APLOG_MARK, APLOG_CRIT, errno, g->s, "mod_orx: cannot fork oorexx-host");
@@ -430,12 +439,18 @@ static int start_host(oorx_gen *g)
             if (maxfd < 0 || maxfd > 65536) maxfd = 65536;
             for (fd = 4; fd < maxfd; fd++) close(fd);
         }
+        /* The wait before a restart, here and not in Apache's parent,     */
+        /* which must not block; connections queue on the socket meanwhile. */
+        /* Its signals are the default ones already: a stop, a restart or   */
+        /* the death of Apache ends it.                                     */
+        if (delay > 0) sleep((unsigned)delay);
         execv(g->host, g->argv);
         _exit(127);
     }
     memset(&g->proc, 0, sizeof g->proc);
     g->proc.pid = pid;
     g->running = 1;
+    g->started = apr_time_now() + apr_time_from_sec(delay);
     apr_proc_other_child_register(&g->proc, host_maint, g, NULL, g->pool);
     ap_log_error(APLOG_MARK, APLOG_INFO, 0, g->s,
                  "mod_orx: oorexx-host started (pid %ld) on %s", (long)pid, g->path);
@@ -461,10 +476,20 @@ static void host_maint(int reason, void *data, apr_wait_t status)
                          "not restarting it", g->host, (int)status);
             break;
         }
-        ap_log_error(APLOG_MARK, APLOG_ERR, 0, g->s,
-                     "mod_orx: oorexx-host (pid %ld) %s (status %d); restarting it",
-                     (long)g->proc.pid,
-                     reason == APR_OC_REASON_LOST ? "was lost" : "ended", (int)status);
+        if (apr_time_now() - g->started >= apr_time_from_sec(HOST_STABLE)) g->delay = 0;
+        else g->delay = g->delay ? (g->delay * 2 > HOST_MAX_DELAY ? HOST_MAX_DELAY
+                                                                  : g->delay * 2) : 1;
+        if (g->delay)
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, g->s,
+                         "mod_orx: oorexx-host (pid %ld) %s (status %d); restarting it "
+                         "in %d s", (long)g->proc.pid,
+                         reason == APR_OC_REASON_LOST ? "was lost" : "ended", (int)status,
+                         g->delay);
+        else
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, g->s,
+                         "mod_orx: oorexx-host (pid %ld) %s (status %d); restarting it",
+                         (long)g->proc.pid,
+                         reason == APR_OC_REASON_LOST ? "was lost" : "ended", (int)status);
         start_host(g);
         break;
     default:            /* RESTART, RUNNING, UNWRITABLE, UNREGISTER: nothing */
