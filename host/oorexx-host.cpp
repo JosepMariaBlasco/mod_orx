@@ -1085,8 +1085,26 @@ static void usage(const char *argv0)
         "       [--preload FILE]... [--plugin CLASS:PATH]...\n", argv0);
 }
 
+/* ooRexx keeps the files of a user's rxapi in $XDG_RUNTIME_DIR, or else    */
+/* $TMPDIR, or else /tmp, taking the first that is a directory, without     */
+/* asking whether this user may write there (5.3.0 r13344,                  */
+/* SysCSStream.cpp, getServiceLocation). An Apache started from another     */
+/* user's session (sudo keeps XDG_RUNTIME_DIR) hands its children that      */
+/* user's directory: rxapi cannot start in it, and every process pays about */
+/* 2 s for its first interpreter (measured). Such a variable is of no use   */
+/* to us: drop it, and ooRexx goes on to the next.                          */
+static void drop_unwritable_service_dirs(void)
+{
+    static const char *const vars[] = { "XDG_RUNTIME_DIR", "TMPDIR" };
+    for (size_t i = 0; i < sizeof vars / sizeof vars[0]; i++) {
+        const char *d = getenv(vars[i]);
+        if (d && access(d, W_OK | X_OK) != 0) unsetenv(vars[i]);
+    }
+}
+
 int main(int argc, char **argv)
 {
+    drop_unwritable_service_dirs();
     const char *path = NULL;
     int listen_fd = -1;
     int min_procs = 4, max_procs = -1, max_requests = 1000, grace = 70;

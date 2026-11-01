@@ -111,9 +111,12 @@ rm -f /tmp/lc.*
 echo "== Stop with a request in flight"
 : > "$MARK"; chmod 666 "$MARK"
 get mark.rex > /dev/null &
-sleep 1; apachectl -k stop; wait; sleep 3
+sleep 1; apachectl -k stop; wait
+hosts() { ps -eo stat,args | grep '[o]orexx-host' | grep -vc '^Z'; }
+T0=$(date +%s)                  # the host drains, then ends: up to 10 s
+while [ "$(hosts)" != 0 ] && [ $(($(date +%s) - T0)) -lt 10 ]; do sleep 0.2; done
 check "the program in flight finished" "$(cat "$MARK")" finished
-check "no host left" "$(ps -eo stat,args | grep '[o]orexx-host' | grep -vc '^Z')" 0
+check "no host left" "$(hosts)" 0
 check "the socket is gone" "$(ls /var/run/apache2/oorexx.sock 2>/dev/null)" ""
 check "no segfault of Apache in the whole run" "$(( $(segfaults) - S0 ))" 0
 
