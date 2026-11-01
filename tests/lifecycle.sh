@@ -97,13 +97,14 @@ check "  ...one log line each" "$(grep -c 'mod_orx: oorexx-host .*restarting it'
 
 echo "== The pool grows and stays within its maximum"
 MAX=$(ps -eo args | awk '/[o]orexx-host --listen/ {for (i=1;i<NF;i++) if ($i=="--max-processes") print $(i+1); exit}')
-for i in $(seq 1 $((MAX + 2))); do get 'slow.rex?s=3' > /tmp/lc.g$i & done
-PEAK=0
-for t in $(seq 1 15); do        # the peak over 3 seconds, sampled
-    N=$(children); [ "$N" -gt "$PEAK" ] && PEAK=$N; sleep 0.2
+for i in $(seq 1 $((MAX + 2))); do get 'slow.rex?s=6' > /tmp/lc.g$i & done
+PEAK=0; SEEN=
+for t in $(seq 1 30); do        # the peak over 6 seconds, sampled
+    N=$(children); [ "$N" -gt "$PEAK" ] && PEAK=$N; SEEN="$SEEN $N"; sleep 0.2
 done
 wait
 check "grown to the maximum ($MAX), never beyond" "$PEAK" "$MAX"
+[ "$PEAK" = "$MAX" ] || echo "        FAIL detail: children every 0.2 s:$SEEN"
 check "every request answered" "$(cat /tmp/lc.g* | tr -d '\n' | sed 's/200//g')" ""
 rm -f /tmp/lc.*
 

@@ -62,5 +62,16 @@ sleep 1
 : > /var/log/apache2/error.log    # after the restart: count only the suite
 
 echo "== Running the suite"
-(cd "$REXXHTTP/tests" && PATH="framework:http:$PATH" rexx http/RexxHTTP.testGroup) | tail -8
-echo "== error.log: $(wc -l < /var/log/apache2/error.log) line(s)"
+OUT=$(mktemp)
+(cd "$REXXHTTP/tests" && PATH="framework:http:$PATH" rexx http/RexxHTTP.testGroup) > "$OUT" 2>&1
+tail -8 "$OUT"
+LINES=$(wc -l < /var/log/apache2/error.log)
+echo "== error.log: $LINES line(s)"
+# Its first lines, if any, to see why without the log file.
+head -20 /var/log/apache2/error.log | sed 's/^/  log: /'
+# Green: the suite ran (it prints its counts), 0 failures, 0 errors, and an
+# empty error.log.
+RAN=$(grep -c 'Tests ran:' "$OUT")
+BAD=$(grep -E '^(Failures|Errors): +[1-9]' "$OUT" | wc -l)
+rm -f "$OUT"
+[ "$RAN" -ge 1 ] && [ "$BAD" = 0 ] && [ "$LINES" = 0 ]

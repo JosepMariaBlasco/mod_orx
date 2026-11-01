@@ -79,17 +79,15 @@ jobs:
                "$OOREXX_FILES/oorexx-5.3.0-$OOREXX_REV.macos.arm64.x86_64.dmg/download"
           hdiutil attach -nobrowse -readonly -mountpoint /Volumes/oorexx "$RUNNER_TEMP/oorexx.dmg"
           echo "::notice title=The dmg::$(find /Volumes/oorexx -maxdepth 3 | head -60 | awk '{ printf "%s%%0A", $0 }')"
-          pkg=$(find /Volumes/oorexx -maxdepth 3 -name '*.pkg' | head -1)
-          if [ -n "$pkg" ]; then
-              sudo installer -pkg "$pkg" -target /
-          else
-              app=$(find /Volumes/oorexx -maxdepth 2 -name '*.app' | head -1)
-              [ -n "$app" ] && sudo cp -R "$app" /Applications/
-          fi
-          rexx=$(command -v rexx || find /usr/local /opt /Applications /Library -name rexx -type f -perm -u+x 2>/dev/null | head -1)
-          hdr=$(find /usr/local /opt /Applications /Library -name oorexxapi.h 2>/dev/null | head -1)
-          lib=$(find /usr/local /opt /Applications /Library \( -name 'librexx.dylib' -o -name 'librexx.*.dylib' \) 2>/dev/null | head -3 | tr '\n' ' ')
-          echo "::notice title=ooRexx found::rexx: $rexx%0Aheader: $hdr%0Alibraries: $lib%0A$("$rexx" -v 2>&1 | head -1)"
+          # The dmg holds a folder, oorexx5, to be dragged to Applications.
+          sudo cp -R /Volumes/oorexx/oorexx5 /Applications/
+          O=/Applications/oorexx5
+          echo "::notice title=oorexx5::$(find $O -maxdepth 2 -not -name '*.cls' -not -name '*.rex' -not -name '*.xs*' -not -name '*.dtd' | head -60 | awk '{ printf "%s%%0A", $0 }')"
+          rexx=$(find $O -name rexx -type f -perm -u+x 2>/dev/null | head -1)
+          hdr=$(find $O -name oorexxapi.h 2>/dev/null | head -1)
+          lib=$(find $O \( -name 'librexx.dylib' -o -name 'librexx.*.dylib' \) 2>/dev/null | head -3 | tr '\n' ' ')
+          ver=$([ -n "$rexx" ] && "$rexx" -v 2>&1 | head -2 | awk '{ printf "%s%%0A", $0 }')
+          echo "::notice title=ooRexx found::rexx: $rexx%0Aheader: $hdr%0Alibraries: $lib%0A$ver"
           [ -n "$rexx" ] && [ -n "$hdr" ] || { echo "::error title=ooRexx::rexx or oorexxapi.h not found"; exit 1; }
           echo "PATH=$(dirname "$rexx"):$PATH" >> "$GITHUB_ENV"
           echo "OOREXX_PREFIX=$(dirname "$(dirname "$hdr")")" >> "$GITHUB_ENV"
