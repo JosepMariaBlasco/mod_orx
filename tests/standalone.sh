@@ -107,6 +107,13 @@ T0=$(date +%s)
 while [ "$(alive "$H")" != 0 ] && [ $(($(date +%s) - T0)) -lt 15 ]; do sleep 0.2; done
 check "every process of the host ends on its own" "$(alive "$H")" 0
 echo "        (in $(($(date +%s) - T0)) s)"
+if [ "$(alive "$H")" != 0 ]; then
+    echo "        FAIL detail: Apache's parent was $P; keeper $K, master $M"
+    for p in $H; do
+        ps -o pid=,ppid=,stat=,etime=,args= -p "$p" 2>/dev/null | sed 's/^/        FAIL detail: /'
+    done
+    grep -E 'orx|oorexx' "$T/error.log" | tail -8 | sed 's/^/        FAIL detail: log: /'
+fi
 check "after the program running finished" "$(cat "$T/mark")" finished
 wait
 

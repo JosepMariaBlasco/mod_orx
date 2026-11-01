@@ -14,9 +14,13 @@ env:
 
 jobs:
   linux:
-    name: Ubuntu 24.04, every test, event and prefork
+    name: Ubuntu 24.04, every test, ${{ matrix.mpm }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mpm: [event, prefork]
     env:
       ORX_CI_SUMMARY: /tmp/orx-ci-summary
     steps:
@@ -46,22 +50,20 @@ jobs:
           make modrexx
           sudo make install-modrexx
 
-      - name: Every test, event
+      - name: Apache with the ${{ matrix.mpm }} MPM
         run: |
-          sudo apachectl -k start || true
-          sudo -E tests/ci-battery.sh event "$RUNNER_TEMP/rexxhttp"
-
-      - name: Every test, prefork
-        if: always()
-        run: |
-          sudo apachectl -k stop; sleep 2
-          sudo a2dismod -f mpm_event; sudo a2enmod mpm_prefork
+          sudo apachectl -k stop || true; sleep 2
+          sudo a2dismod -f mpm_event mpm_worker mpm_prefork > /dev/null 2>&1 || true
+          sudo a2enmod mpm_${{ matrix.mpm }}
           sudo apachectl -k start; sleep 2
-          sudo -E tests/ci-battery.sh prefork "$RUNNER_TEMP/rexxhttp"
+          echo "::notice title=MPM::$(apachectl -V | grep MPM)"
+
+      - name: Every test
+        run: sudo -E tests/ci-battery.sh ${{ matrix.mpm }} "$RUNNER_TEMP/rexxhttp"
 
       - name: Summary
         if: always()
-        run: tests/ci-summary.sh "Linux"
+        run: tests/ci-summary.sh "Linux ${{ matrix.mpm }}"
 
   macos:
     name: macOS, build and tests/standalone.sh
