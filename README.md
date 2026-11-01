@@ -204,6 +204,37 @@ read; one that fails to load (a syntax error, say) stops the host, with the
 error, its file and its line in the error log, and the host is not
 restarted.
 
+### What a host process keeps between phases: `.environment`
+
+Every phase runs in a new interpreter instance, so its `.local`, its
+streams and the packages it loads itself start from scratch. `.environment`
+does not: in ooRexx it belongs to the process, and every instance shares it
+(measured). Whatever a program leaves there, any later phase served by that
+process sees, whichever program it runs, of whatever class, in whatever
+phase. mod_orx does not clean it, and does not try to: a check of the
+entries would miss everything below them (a collection that was already
+there and has been filled, a class's state, a stream left open), and a
+cleaning that cannot be complete would only promise what it does not keep.
+So:
+
+- **Do not leave anything sensitive in `.environment`**, nor in any object
+  that a later program can reach from it.
+- **It is not a store.** Each process of the pool has its own
+  `.environment`, and each request goes to any of them: what one request
+  leaves there, the next may not see. At most it is a cache that is
+  sometimes right, and it dies, without notice, when its process is
+  recycled (every `OoRexxMaxRequests` phases), when the pool shrinks, when
+  the process or the host dies, and on every restart of Apache, graceful
+  ones too. In a closed application, where nothing can leak, it may serve
+  as such a cache; state that must be shared between requests belongs
+  outside the process (a file, a database).
+- State that is meant to be shared between the phases a process serves has
+  a deliberate place: the class state of a preloaded package (see above),
+  with the same lifetime and the same visibility, but in plain sight.
+
+RexxHTTP itself keeps the request and the response in `.local`; it puts
+only its four classes in `.environment`.
+
 ### Authentication, authorization and logging
 
 These phases use the mechanisms Apache already has, so they combine with
