@@ -46,6 +46,7 @@
  *   OoRexxMaxRequests 1000                    # phases per host process
  *   OoRexxTimeout 60
  *   OoRexxQueueTimeout 10                     # wait for a free host process
+ *   OoRexxLogQueueTimeout 2                   # the same, in the logging phase
  *   OoRexxPreload /path/HTTP.Request.cls ...  # loaded once per host process
  *   <Directory ...>  Options +ExecCGI  AddHandler oorexx-cgi .rex  </Directory>
  *   <Location ...>   AuthType Basic  AuthName x  AuthBasicProvider oorexx
@@ -89,6 +90,7 @@ module AP_MODULE_DECLARE_DATA orx_module;
 
 #define DEFAULT_TIMEOUT 60
 #define DEFAULT_QUEUE_TIMEOUT 10
+#define DEFAULT_LOG_QUEUE_TIMEOUT 2
 #define DEFAULT_SOCKET        "oorexx.sock"   /* in DefaultRuntimeDir */
 #define DEFAULT_MIN_PROCESSES 2
 #define DEFAULT_MAX_PROCESSES 8
@@ -119,6 +121,7 @@ static apr_array_header_t *g_plugins;
 typedef struct {
     int         timeout;        /* -1 = unset                            */
     int         queue_timeout;  /* OoRexxQueueTimeout; -1 = unset        */
+    int         log_queue_timeout; /* OoRexxLogQueueTimeout; -1 = unset  */
     const char *authn_program;  /* OoRexxAuthnProgram; NULL = unset      */
     const char *log_hook;       /* OoRexxLogHook; NULL = unset, "" = off */
     /* OoRexx<Phase>Hook, by phase number: the program (NULL = unset,      */
@@ -133,6 +136,7 @@ static void *create_dir_cfg(apr_pool_t *p, char *dir)
     (void)dir;
     c->timeout = -1;
     c->queue_timeout = -1;
+    c->log_queue_timeout = -1;
     return c;
 }
 
@@ -141,6 +145,8 @@ static void *merge_dir_cfg(apr_pool_t *p, void *basev, void *addv)
     oorx_dir_cfg *base = basev, *add = addv, *c = apr_pcalloc(p, sizeof *c);
     c->timeout = add->timeout >= 0 ? add->timeout : base->timeout;
     c->queue_timeout = add->queue_timeout >= 0 ? add->queue_timeout : base->queue_timeout;
+    c->log_queue_timeout = add->log_queue_timeout >= 0 ? add->log_queue_timeout
+                                                        : base->log_queue_timeout;
     c->authn_program = add->authn_program ? add->authn_program : base->authn_program;
     c->log_hook = add->log_hook ? add->log_hook : base->log_hook;
     {
@@ -223,16 +229,20 @@ static const char *set_timeout(cmd_parms *cmd, void *dcfg, const char *arg)
 }
 
 /* OoRexxQueueTimeout: how long a phase waits for a free host process,     */
-/* once connected, before it gives up (503; the logging hook is skipped).   */
+/* once connected, before it gives up (503). OoRexxLogQueueTimeout: the     */
+/* same in the logging phase, shorter (the hook is skipped): the client has */
+/* its response already, and a wait there only holds an Apache worker and   */
+/* a place in the host's queue that content may need.                       */
 static const char *set_queue_timeout(cmd_parms *cmd, void *dcfg, const char *arg)
 {
     oorx_dir_cfg *c = dcfg;
     char *end;
     long v = strtol(arg, &end, 10);
-    (void)cmd;
     if (!*arg || *end || v <= 0 || v > 3600)
-        return "OoRexxQueueTimeout must be a positive number of seconds";
-    c->queue_timeout = (int)v;
+        return apr_pstrcat(cmd->pool, cmd->cmd->name,
+                           " must be a positive number of seconds", NULL);
+    if (cmd->info) c->log_queue_timeout = (int)v;
+    else c->queue_timeout = (int)v;
     return NULL;
 }
 
@@ -309,6 +319,9 @@ static const command_rec oorx_cmds[] = {
                   "Seconds a phase may run before the host halts it"),
     AP_INIT_TAKE1("OoRexxQueueTimeout", set_queue_timeout, NULL, RSRC_CONF | ACCESS_CONF,
                   "Seconds a phase waits for a free oorexx-host process (503 after that)"),
+    AP_INIT_TAKE1("OoRexxLogQueueTimeout", set_queue_timeout, (void *)1,
+                  RSRC_CONF | ACCESS_CONF,
+                  "Seconds the logging phase waits for a free oorexx-host process"),
     AP_INIT_TAKE1("OoRexxHost", set_host, NULL, RSRC_CONF,
                   "The oorexx-host executable, or \"none\" if it is started by hand"),
     AP_INIT_TAKE12("OoRexxProcesses", set_processes, NULL, RSRC_CONF,
@@ -679,7 +692,7 @@ static int connect_host(request_rec *r, const char *path, int timeout)
 /* process takes it, and every process may be busy. Returns 0; or -1 if no  */
 /* process took it in time, or -2 if the host does not speak our protocol   */
 /* or the connection broke (each logged).                                   */
-static int wait_accept(request_rec *r, int fd, int seconds)
+static int wait_accept(request_rec *r, int fd, int seconds, const char *directive)
 {
     struct pollfd pf;
     apr_time_t deadline = apr_time_now() + apr_time_from_sec(seconds);
@@ -698,7 +711,7 @@ static int wait_accept(request_rec *r, int fd, int seconds)
     if (n == 0) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
                       "mod_orx: no oorexx-host process free within %d s "
-                      "(OoRexxQueueTimeout)", seconds);
+                      "(%s)", seconds, directive);
         return -1;
     }
     if (n < 0 || oorx_recv_header(fd, &type, &flags, &len) < 0 || type != OORX_ACCEPT ||
@@ -1034,13 +1047,17 @@ static int host_configured(request_rec *r)
 /* Connect to the host and start the phase. Returns OK, with the connection */
 /* in *cp, or the status to answer with: what ap_setup_client_block said;  */
 /* 503 if the host cannot be reached, or no host process takes the phase    */
-/* within OoRexxQueueTimeout; 500 if the host does not speak our protocol   */
+/* within OoRexxQueueTimeout (OoRexxLogQueueTimeout in the logging phase);  */
+/* 500 if the host does not speak our protocol                              */
 /* (all of them logged).                                                    */
 static int orx_phase_open(request_rec *r, const orx_phase *ph, orx_conn **cp)
 {
     oorx_dir_cfg *dcfg = ap_get_module_config(r->per_dir_config, &orx_module);
     int timeout = dcfg->timeout > 0 ? dcfg->timeout : DEFAULT_TIMEOUT;
-    int queue = dcfg->queue_timeout > 0 ? dcfg->queue_timeout : DEFAULT_QUEUE_TIMEOUT;
+    int log = ph->phase == OORX_PHASE_LOG;
+    int queue = log ? (dcfg->log_queue_timeout > 0 ? dcfg->log_queue_timeout
+                                                    : DEFAULT_LOG_QUEUE_TIMEOUT)
+                    : (dcfg->queue_timeout > 0 ? dcfg->queue_timeout : DEFAULT_QUEUE_TIMEOUT);
     oorx_conn *c;
     char *begin, *abuf = NULL;
     apr_size_t plen, alen = 0, acap = 0;
@@ -1063,7 +1080,8 @@ static int orx_phase_open(request_rec *r, const orx_phase *ph, orx_conn **cp)
     if (c->fd < 0) return HTTP_SERVICE_UNAVAILABLE;
     apr_pool_cleanup_register(r->pool, (void *)(apr_uintptr_t)c->fd, close_fd,
                               apr_pool_cleanup_null);
-    switch (wait_accept(r, c->fd, queue)) {
+    switch (wait_accept(r, c->fd, queue,
+                        log ? "OoRexxLogQueueTimeout" : "OoRexxQueueTimeout")) {
     case -1: return HTTP_SERVICE_UNAVAILABLE;
     case -2: return HTTP_INTERNAL_SERVER_ERROR;
     }

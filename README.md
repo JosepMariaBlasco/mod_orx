@@ -151,7 +151,8 @@ OoRexxTimeout 60
 | `OoRexxProcesses min [max]` | `2 8` | Size of the host's pool. With a single number, the pool has a fixed size. |
 | `OoRexxMaxRequests n` | `1000` | Phases a host process serves before it is replaced (`0`: no limit). |
 | `OoRexxTimeout seconds` | `60` | Deadline of a phase; also valid per directory. A drained host gets the largest one, plus 10 seconds, before what is left is killed. |
-| `OoRexxQueueTimeout seconds` | `10` | How long a phase waits for a free host process when they are all busy. After that, a 503 (a logging hook is skipped), and a line in the error log. Also valid per directory. |
+| `OoRexxQueueTimeout seconds` | `10` | How long a phase waits for a free host process when they are all busy. After that, a 503 (500 in an authentication or authorization provider), and a line in the error log. Also valid per directory. |
+| `OoRexxLogQueueTimeout seconds` | `2` | The same, in the logging phase, where the hook is skipped after that. Shorter, because the client already has its response: waiting there only holds an Apache worker, and a place in the host's queue that content may need. Also valid per directory. |
 | `OoRexxAuthnProgram path` | none | The program behind `AuthBasicProvider oorexx`. Per directory. |
 | `OoRexxLogHook path` \| `none` | none | A program to run in the logging phase. Per directory; `none` switches off an inherited one. |
 | `OoRexx<Phase>Hook path [args...]` \| `none` | none | A native program in that phase (see below): `PostReadRequest` and `Trans` in the server or a `<VirtualHost>`; `HeaderParser`, `Access`, `Authen`, `Type` and `Fixup` per directory too. |
@@ -388,7 +389,8 @@ including errors, timeouts and the error log.
 preloaded package shares between phases and what a program's own package
 does not, a missing file, and a file that fails to load.
 
-`tests/queue.sh` checks `OoRexxQueueTimeout` with every host process busy.
+`tests/queue.sh` checks `OoRexxQueueTimeout` and `OoRexxLogQueueTimeout`
+with every host process busy.
 `tests/apache.sh` checks `Address APACHE` in the providers and the logging
 hook; `tests/native-phases.sh`, the `OoRexx<Phase>Hook` hooks: the order of
 the phases, every kind of return value, what each phase may change, the

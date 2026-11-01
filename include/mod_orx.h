@@ -79,7 +79,8 @@ APR_DECLARE_OPTIONAL_FN(void, orx_vars_add, (orx_vars *v, const char *key,
 APR_DECLARE_OPTIONAL_FN(int, orx_vars_related, (orx_vars *v, request_rec ***rel));
 /* Connect and start the phase. OK, with the connection in *c; or the       */
 /* status to answer with (the reason is logged): 503 when no host process   */
-/* takes the phase within OoRexxQueueTimeout.                               */
+/* takes the phase within OoRexxQueueTimeout (in the logging phase,         */
+/* OoRexxLogQueueTimeout).                                                  */
 APR_DECLARE_OPTIONAL_FN(int, orx_phase_open, (request_rec *r, const orx_phase *ph,
                                               orx_conn **c));
 /* The program's output: to the client as it comes, or nowhere. Both return */
