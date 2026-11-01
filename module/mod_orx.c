@@ -78,8 +78,12 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
-#ifdef __linux__
+/* Linux signals a process when its parent dies (PR_SET_PDEATHSIG); the   */
+/* host's keeper watches for that itself elsewhere, or when built with      */
+/* -DORX_PORTABLE (to test that on Linux).                                  */
+#if defined(__linux__) && !defined(ORX_PORTABLE)
 #include <sys/prctl.h>
+#define ORX_PDEATHSIG 1
 #endif
 
 #include "../include/oorexx_protocol.h"
@@ -420,12 +424,12 @@ static int start_host(oorx_gen *g)
         /* its whole group, and that must not reach the host (measured).   */
         setpgid(0, 0);
         if (ap_unixd_setup_child()) _exit(HOST_EXIT_CONFIG);
-#ifdef __linux__
+#ifdef ORX_PDEATHSIG
         /* After the change of user, which clears it. The host drains if  */
         /* Apache's parent dies without telling it.                        */
         prctl(PR_SET_PDEATHSIG, SIGTERM);
-        if (getppid() != g->parent) _exit(0);
 #endif
+        if (getppid() != g->parent) _exit(0);
         /* What exec keeps and the host should not: Apache's signal mask   */
         /* and ignored signals, and every descriptor but the socket.       */
         sigemptyset(&none);

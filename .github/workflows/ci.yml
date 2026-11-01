@@ -1,0 +1,129 @@
+# Every test reports through annotations (tests/ci-run.sh): a failure as an
+# error with its FAIL lines, and the whole run as one notice at the end.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  OOREXX_FILES: https://sourceforge.net/projects/oorexx/files/oorexx/5.3.0beta
+  OOREXX_REV: "13344"
+
+jobs:
+  linux:
+    name: Ubuntu 24.04, every test, event and prefork
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      ORX_CI_SUMMARY: /tmp/orx-ci-summary
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ooRexx, Apache and RexxHTTP
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/oorexx.deb" \
+               "$OOREXX_FILES/oorexx-5.3.0-$OOREXX_REV.ubuntu2404.x86_64.deb/download"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq "$RUNNER_TEMP/oorexx.deb" apache2 apache2-dev
+          sudo a2enmod cgid actions
+          rexx -v
+          curl -sSfL -o "$RUNNER_TEMP/rexxhttp.zip" https://rexx.epbcn.com/rexxhttp/rexxhttp-latest.zip
+          mkdir -p "$RUNNER_TEMP/rexxhttp"
+          unzip -q "$RUNNER_TEMP/rexxhttp.zip" -d "$RUNNER_TEMP/rexxhttp"
+          echo "::notice title=Linux setup::$(rexx -v | head -1); $(apache2 -v | head -1)"
+
+      - name: Build and install
+        run: |
+          make
+          sudo make install
+          make modrexx
+          sudo make install-modrexx
+
+      - name: Every test, event
+        run: |
+          sudo apachectl -k start || true
+          sudo -E tests/ci-battery.sh event "$RUNNER_TEMP/rexxhttp"
+
+      - name: Every test, prefork
+        if: always()
+        run: |
+          sudo apachectl -k stop; sleep 2
+          sudo a2dismod -f mpm_event; sudo a2enmod mpm_prefork
+          sudo apachectl -k start; sleep 2
+          sudo -E tests/ci-battery.sh prefork "$RUNNER_TEMP/rexxhttp"
+
+      - name: Summary
+        if: always()
+        run: tests/ci-summary.sh "Linux"
+
+  macos:
+    name: macOS, build and tests/standalone.sh
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      ORX_CI_SUMMARY: /tmp/orx-ci-summary
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Apache
+        run: |
+          brew install httpd
+          echo "APXS=$(brew --prefix)/bin/apxs" >> "$GITHUB_ENV"
+
+      - name: Install ooRexx
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/oorexx.dmg" \
+               "$OOREXX_FILES/oorexx-5.3.0-$OOREXX_REV.macos.arm64.x86_64.dmg/download"
+          hdiutil attach -nobrowse -readonly -mountpoint /Volumes/oorexx "$RUNNER_TEMP/oorexx.dmg"
+          echo "::notice title=The dmg::$(find /Volumes/oorexx -maxdepth 3 | head -60 | awk '{ printf "%s%%0A", $0 }')"
+          pkg=$(find /Volumes/oorexx -maxdepth 3 -name '*.pkg' | head -1)
+          if [ -n "$pkg" ]; then
+              sudo installer -pkg "$pkg" -target /
+          else
+              app=$(find /Volumes/oorexx -maxdepth 2 -name '*.app' | head -1)
+              [ -n "$app" ] && sudo cp -R "$app" /Applications/
+          fi
+          rexx=$(command -v rexx || find /usr/local /opt /Applications /Library -name rexx -type f -perm -u+x 2>/dev/null | head -1)
+          hdr=$(find /usr/local /opt /Applications /Library -name oorexxapi.h 2>/dev/null | head -1)
+          lib=$(find /usr/local /opt /Applications /Library \( -name 'librexx.dylib' -o -name 'librexx.*.dylib' \) 2>/dev/null | head -3 | tr '\n' ' ')
+          echo "::notice title=ooRexx found::rexx: $rexx%0Aheader: $hdr%0Alibraries: $lib%0A$("$rexx" -v 2>&1 | head -1)"
+          [ -n "$rexx" ] && [ -n "$hdr" ] || { echo "::error title=ooRexx::rexx or oorexxapi.h not found"; exit 1; }
+          echo "PATH=$(dirname "$rexx"):$PATH" >> "$GITHUB_ENV"
+          echo "OOREXX_PREFIX=$(dirname "$(dirname "$hdr")")" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          if ! make APXS="$APXS" OOREXX_PREFIX="$OOREXX_PREFIX" > build.log 2>&1; then
+              cat build.log
+              echo "::error title=make failed::$(grep -E 'error|Error|undefined' build.log | head -30 | sed 's/%/%25/g' | awk '{ printf "%s%%0A", $0 }')"
+              exit 1
+          fi
+          cat build.log
+          warnings=$(grep -c -E 'warning:' build.log || true)
+          [ "$warnings" = 0 ] || echo "::warning title=Compiler warnings ($warnings)::$(grep -E 'warning:' build.log | head -20 | sed 's/%/%25/g' | awk '{ printf "%s%%0A", $0 }')"
+
+      - name: Install
+        run: |
+          mkdir -p "$HOME/bin"
+          make install APXS="$APXS" OOREXX_PREFIX="$OOREXX_PREFIX" BINDIR="$HOME/bin" > install.log 2>&1 ||
+              { cat install.log; echo "::error title=make install failed::$(tail -20 install.log | sed 's/%/%25/g' | awk '{ printf "%s%%0A", $0 }')"; exit 1; }
+          cat install.log
+          echo "OOREXX_HOST=$HOME/bin/oorexx-host" >> "$GITHUB_ENV"
+
+      - name: tests/standalone.sh
+        run: |
+          tests/ci-run.sh "macOS standalone event" tests/standalone.sh event
+          tests/ci-run.sh "macOS standalone prefork" tests/standalone.sh prefork
+
+      - name: The mod_rexx layer builds (not required yet)
+        continue-on-error: true
+        run: |
+          make modrexx APXS="$APXS" OOREXX_PREFIX="$OOREXX_PREFIX" > modrexx.log 2>&1 ||
+              { cat modrexx.log; echo "::warning title=make modrexx failed::$(grep -E 'error|undefined' modrexx.log | head -20 | sed 's/%/%25/g' | awk '{ printf "%s%%0A", $0 }')"; exit 1; }
+
+      - name: Summary
+        if: always()
+        run: tests/ci-summary.sh "macOS"

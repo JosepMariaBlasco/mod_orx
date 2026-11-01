@@ -427,6 +427,19 @@ does not, a missing file, and a file that fails to load.
 with every host process busy. `tests/restart.sh` checks the wait between
 restarts: a host that dies as it starts, a stop during a wait, and a host
 that had run for a minute (it takes about two minutes).
+
+`tests/standalone.sh [event|prefork]` needs nothing of Debian's: it starts
+an Apache of its own, from a minimal configuration in a temporary
+directory, checks that a Rexx CGI is served, kills Apache's parent with a
+program still running, and checks that every process of the host ends on
+its own once that program has finished. On Linux the host learns of the
+death from the kernel (`PR_SET_PDEATHSIG`); elsewhere it watches for it
+itself, and `make CXXFLAGS='-O2 -Wall -DORX_PORTABLE' APXS='apxs
+-Wc,-DORX_PORTABLE'` builds that way on Linux too, to test it there.
+
+Continuous integration (`.github/workflows/ci.yml`) runs every test on
+Ubuntu under both MPMs, and builds mod_orx and runs `tests/standalone.sh`
+on macOS. Each test reports through annotations (`tests/ci-run.sh`).
 `tests/apache.sh` checks `Address APACHE` in the providers and the logging
 hook; `tests/native-phases.sh`, the `OoRexx<Phase>Hook` hooks: the order of
 the phases, every kind of return value, what each phase may change, the

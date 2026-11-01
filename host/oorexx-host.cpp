@@ -74,8 +74,14 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <dlfcn.h>
-#ifdef __linux__
+/* Linux kills or warns a process when its parent dies (PR_SET_PDEATHSIG). */
+/* Elsewhere (macOS, the BSDs), the keeper and the master watch their       */
+/* parent themselves, and the children already end with the stop pipe (see  */
+/* child_main). -DORX_PORTABLE builds those paths on Linux too, to test     */
+/* them there.                                                              */
+#if defined(__linux__) && !defined(ORX_PORTABLE)
 #include <sys/prctl.h>
+#define ORX_PDEATHSIG 1
 #endif
 
 #include <string>
@@ -635,6 +641,22 @@ static bool parse_strings(const std::string &t, std::vector<std::string> &out)
     return true;
 }
 
+/* clearenv() is glibc's; elsewhere, unset every variable by name.         */
+static void clear_env(void)
+{
+#if defined(__GLIBC__) && !defined(ORX_PORTABLE)
+    clearenv();
+#else
+    extern char **environ;
+    std::vector<std::string> names;
+    for (char **e = environ; e && *e; e++) {
+        const char *eq = strchr(*e, '=');
+        names.push_back(eq ? std::string(*e, eq - *e) : std::string(*e));
+    }
+    for (size_t i = 0; i < names.size(); i++) unsetenv(names[i].c_str());
+#endif
+}
+
 static void serve(int fd)
 {
     g_fd = fd; g_in.clear(); g_in_eof = false; g_broken = false;
@@ -688,7 +710,7 @@ static void serve(int fd)
     if (type != OORX_VARS) return;
     std::string vars(len, '\0');
     if (len && oorx_read_all(fd, &vars[0], len) < 0) return;
-    clearenv();
+    clear_env();
     g_snap.req.clear(); g_snap.client.clear();
     bool snapshot = (flags & OORX_FLAG_SNAPSHOT) != 0;
     for (size_t p = 0; p + 4 <= vars.size(); ) {
@@ -884,6 +906,7 @@ static int  slot_get(int i)        { return __atomic_load_n(&g_slots[i].state, _
 /* have idle children to spare before the master retires one.              */
 #define CHILD_POLL_MS    500
 #define MASTER_TICK_MS   200
+#define KEEPER_TICK_MS   1000
 #define SHRINK_AFTER_MS  10000
 
 /* Exit status 2 means "the configuration is wrong": mod_orx does not       */
@@ -985,10 +1008,13 @@ static void load_anchor(void)
 
 static void child_main(int me, pid_t master, int lsock, int stopfd, int max_requests)
 {
-#ifdef __linux__
-    prctl(PR_SET_PDEATHSIG, SIGKILL);  /* never outlive the master */
-    if (getppid() != master) _exit(0);
+    /* Never outlive the master. Everywhere, its death closes the stop     */
+    /* pipe, and an idle child drains and exits; on Linux, besides, a busy  */
+    /* one is killed at once.                                               */
+#ifdef ORX_PDEATHSIG
+    prctl(PR_SET_PDEATHSIG, SIGKILL);
 #endif
+    if (getppid() != master) _exit(0);
     signal(SIGTERM, SIG_DFL);
     signal(SIGCHLD, SIG_DFL);
     signal(SIGPIPE, SIG_IGN);
@@ -1085,6 +1111,7 @@ int main(int argc, char **argv)
     }
 
     int lsock = listen_fd;
+    pid_t keeper = 0;       /* managed: the master's parent */
     if (path) {
         /* Standalone: bind the socket ourselves (only the user the host    */
         /* runs as, Apache's, may connect).                                 */
@@ -1121,12 +1148,20 @@ int main(int argc, char **argv)
         /* host may need the module afterwards: not even being reaped.    */
         /* If the master dies on its own, the keeper exits with its status */
         /* and the module starts a new host.                               */
-        /* The keeper takes its signals synchronously (sigwaitinfo), so   */
-        /* they are blocked from before the fork: none can be lost.        */
+        /* The keeper's signals are blocked from before the fork, so that  */
+        /* none can be lost: on Linux it takes them synchronously           */
+        /* (sigwaitinfo), and the module has asked for a SIGTERM if Apache's */
+        /* parent dies; elsewhere they reach a loop through a self-pipe, and */
+        /* the loop also sees, every second, whether Apache's parent is     */
+        /* still its parent.                                                */
         sigset_t ks, old;
         sigemptyset(&ks);
         sigaddset(&ks, SIGTERM); sigaddset(&ks, SIGINT); sigaddset(&ks, SIGCHLD);
         sigprocmask(SIG_BLOCK, &ks, &old);
+        pid_t self = getpid();
+#ifndef ORX_PDEATHSIG
+        pid_t apache = getppid();
+#endif
         pid_t m = fork();
         if (m < 0) { perror("oorexx-host: fork"); return 1; }
         if (m > 0) {
@@ -1135,18 +1170,41 @@ int main(int argc, char **argv)
             signal(SIGUSR2, SIG_IGN);
             close(lsock);
             int st;
+#ifdef ORX_PDEATHSIG
             for (;;) {
                 if (waitpid(m, &st, WNOHANG) == m) break;
                 int sig = sigwaitinfo(&ks, NULL);
                 if (sig == SIGTERM || sig == SIGINT) { kill(m, SIGTERM); _exit(0); }
             }
+#else
+            if (pipe(g_wake) < 0) { kill(m, SIGTERM); _exit(1); }
+            fcntl(g_wake[0], F_SETFL, O_NONBLOCK);
+            fcntl(g_wake[1], F_SETFL, O_NONBLOCK);
+            struct sigaction ka;
+            memset(&ka, 0, sizeof ka);
+            ka.sa_handler = on_signal;
+            sigaction(SIGTERM, &ka, NULL);
+            sigaction(SIGINT,  &ka, NULL);
+            sigaction(SIGCHLD, &ka, NULL);
+            sigprocmask(SIG_SETMASK, &old, NULL);
+            for (;;) {
+                if (waitpid(m, &st, WNOHANG) == m) break;
+                if (g_stop || (0 && getppid() != apache)) { kill(m, SIGTERM); _exit(0); }
+                struct pollfd pf = { g_wake[0], POLLIN, 0 };
+                poll(&pf, 1, KEEPER_TICK_MS);
+                char junk[64];
+                while (read(g_wake[0], junk, sizeof junk) > 0) ;
+            }
+#endif
             /* Never 15 or 7 (Apache's APEXIT_CHILDFATAL and CHILDSICK).    */
             _exit(WIFEXITED(st) && WEXITSTATUS(st) == EXIT_CONFIG ? EXIT_CONFIG : 1);
         }
         sigprocmask(SIG_SETMASK, &old, NULL);
-#ifdef __linux__
+#ifdef ORX_PDEATHSIG
         prctl(PR_SET_PDEATHSIG, SIGTERM);       /* the keeper died: drain */
 #endif
+        keeper = self;
+        if (getppid() != keeper) return 0;      /* it died already */
     }
 
     void *page = mmap(NULL, sizeof(struct slot) * max_procs, PROT_READ | PROT_WRITE,
@@ -1178,6 +1236,10 @@ int main(int argc, char **argv)
     long idle_since = -1;
     bool config_error = false;
     while (!g_stop && !config_error) {
+#ifndef ORX_PDEATHSIG
+        /* The keeper died (Linux sends a SIGTERM): drain.                  */
+        if (keeper > 0 && getppid() != keeper) break;
+#endif
         int st; pid_t dead;
         while ((dead = waitpid(-1, &st, WNOHANG)) > 0) {
             for (int i = 0; i < max_procs; i++)
