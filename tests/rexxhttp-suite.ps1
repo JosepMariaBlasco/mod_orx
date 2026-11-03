@@ -95,13 +95,16 @@ $conf = $conf -replace '(?m)^Define SRVROOT .*$', "Define SRVROOT `"$root`""
 $conf = $conf -replace '(?m)^Listen .*$', 'Listen 127.0.0.1:80'
 $conf = $conf -replace '(?m)^DocumentRoot .*$', 'DocumentRoot "/var/www/html"'
 $conf = $conf -replace '(?m)^<Directory "\$\{SRVROOT\}/htdocs">', '<Directory "/var/www/html">'
-$conf = $conf -replace '(?m)^#(LoadModule actions_module .*)$', '$1'
-if ($Handler -eq 'cgi') { $conf = $conf -replace '(?m)^#(LoadModule cgi_module .*)$', '$1' }
+# The modules the montage needs are loaded below, as RexxHTTP's Windows
+# installer does (httpd.conf ships them commented out); any line of
+# httpd.conf that loads them already goes.
+$conf = $conf -replace '(?m)^\s*LoadModule\s+(actions|cgi)_module\b.*$', ''
 $conf = $conf -replace '(?m)^ErrorLog .*$', 'ErrorLog "logs/suite-error.log"'
 $conf = $conf -replace '(?m)^LogLevel .*$', 'LogLevel warn'
 
 if ($Handler -eq 'cgi') {
     $proc = @'
+LoadModule cgi_module modules/mod_cgi.so
 <Directory "/var/www/html/RexxHTTP">
     Options +ExecCGI
     AddHandler cgi-script .rex
@@ -125,6 +128,7 @@ Alias /RexxHTTP/ /var/www/html/RexxHTTP/
 }
 $montage = $proc + @'
 
+LoadModule actions_module modules/mod_actions.so
 ServerName localhost
 Action RexxHTTPCGI /RexxHTTP/RexxHTTP.rex
 
