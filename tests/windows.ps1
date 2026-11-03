@@ -100,6 +100,37 @@ say ''
 do forever; nop; end
 '@
 
+Set-Content -Encoding ascii "$cgi\fixed.rex" @'
+say 'Content-Type: text/plain'
+say ''
+say 'fixup' value('ORX_FIXUP',,'ENVIRONMENT') .Greeting~hello
+::requires 'Greeting.cls'
+'@
+Set-Content -Encoding ascii "$cgi\Greeting.cls" @'
+::class Greeting public
+::method hello class
+  return 'preloaded'
+'@
+Set-Content -Encoding ascii "$cgi\slow.rex" @'
+call SysSleep 4
+say 'Content-Type: text/plain'
+say ''
+say 'slow done'
+'@
+New-Item -ItemType Directory -Force "$Apache\hooks", "$Apache\htdocs\cgi" | Out-Null
+Set-Content -Encoding ascii "$Apache\hooks\fixup.rex" @'
+use arg word
+Address APACHE
+'SET ENV ORX_FIXUP' word
+return
+'@
+# The same program under mod_cgi, for the comparison: rexx.exe per request.
+Set-Content -Encoding ascii "$Apache\htdocs\cgi\hello.cgi" ("#!" + ($OoRexx -replace '\\', '/') + "/rexx.exe`r`n" + @'
+say 'Content-Type: text/plain'
+say ''
+say 'hello' value('QUERY_STRING',,'ENVIRONMENT') value('REQUEST_METHOD',,'ENVIRONMENT')
+'@)
+
 @"
 ServerRoot "$root"
 ServerName localhost
@@ -108,12 +139,22 @@ LoadModule authn_core_module modules/mod_authn_core.so
 LoadModule authz_core_module modules/mod_authz_core.so
 LoadModule mime_module modules/mod_mime.so
 LoadModule log_config_module modules/mod_log_config.so
+LoadModule cgi_module modules/mod_cgi.so
 LoadModule orx_module modules/mod_orx.so
 ErrorLog logs/orx-error.log
 LogLevel warn orx:info
 PidFile logs/orx.pid
 DocumentRoot "$root/htdocs"
 OoRexxProcesses 2 4
+OoRexxPreload "$root/htdocs/rexx/Greeting.cls"
+<Directory "$root/htdocs/cgi">
+    Options +ExecCGI
+    AddHandler cgi-script .cgi
+    Require all granted
+</Directory>
+<Location /rexx/fixed.rex>
+    OoRexxFixupHook "$root/hooks/fixup.rex" native
+</Location>
 <Directory "$root/htdocs/rexx">
     Options +ExecCGI
     AddHandler oorexx-cgi .rex
@@ -126,8 +167,9 @@ OoRexxProcesses 2 4
 
 $log = "$Apache\logs\orx-error.log"
 Remove-Item $log -ErrorAction SilentlyContinue
-# The host finds rexx.dll on the PATH it inherits from Apache.
-$env:PATH = "$OoRexx;$env:PATH"
+# rexx.dll beside oorexx-host.exe, found there first (a service gets no PATH
+# of ours); rexx.exe stays where it is, for mod_cgi.
+Copy-Item "$OoRexx\*.dll", "$OoRexx\rxapi.exe" "$Apache\bin" -Force
 $env:OORX_TRACE = '1'           # the host's children trace every step (stderr)
 & "$Apache\bin\httpd.exe" -t -f "$Apache\conf\orx.conf"
 check 'configuration' ($LASTEXITCODE -eq 0)
@@ -188,6 +230,29 @@ Start-Sleep 1
 $logtext = Get-Content $log -Raw
 check 'OoRexxTimeout halts a program' ($secs -lt 8 -and $logtext -match 'loop\.rex.*phase timeout') "($([int]$secs) s)"
 
+# --- A native program, Address APACHE, and a preloaded package -------------
+$r = get '/rexx/fixed.rex'
+check 'a fixup hook (Address APACHE) and a preloaded class' ($r.body -eq 'fixup native preloaded') "[$($r.code)] [$($r.body)]"
+
+# --- How fast, against mod_cgi --------------------------------------------------
+$r = get '/cgi/hello.cgi?a=1'
+check 'the same program under mod_cgi' ($r.body -eq 'hello a=1 GET') "[$($r.code)] [$($r.body)]"
+function rps($path, $c) {
+    $o = & "$Apache\bin\ab.exe" -q -n 400 -c $c "http://127.0.0.1:$Port$path" 2>&1
+    $m = [regex]::Match(($o -join "`n"), 'Requests per second:\s+([0-9.]+)')
+    $f = [regex]::Match(($o -join "`n"), 'Failed requests:\s+([0-9]+)')
+    return @{ rps = $(if ($m.Success) { [double]::Parse($m.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture) } else { 0 });
+              failed = $(if ($f.Success) { [int]$f.Groups[1].Value } else { -1 }) }
+}
+$bench = @()
+foreach ($c in 1, 4) {
+    $o = rps '/rexx/hello.rex?b=1' $c
+    $g = rps '/cgi/hello.cgi?b=1' $c
+    $bench += "c=$c mod_orx $([int]$o.rps) rps ($($o.failed) failed), mod_cgi $([int]$g.rps) rps ($($g.failed) failed)"
+    check "c=$c, 400 requests, none failed" ($o.failed -eq 0 -and $o.rps -gt 0) $bench[-1]
+}
+"BENCH $($bench -join '; ')"
+
 # --- Several processes at once ------------------------------------------------
 $pids = 1..8 | ForEach-Object -Parallel {
     (curl.exe -s -m 30 -w ' [%{http_code}]' "http://127.0.0.1:$using:Port/rexx/pid.rex") -join ' '
@@ -222,6 +287,36 @@ Get-Process httpd -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep 3
 $after = @(hosts).Count
 check 'when Apache dies, its hosts die with it (job)' ($before -ge 3 -and $after -eq 0) "($before before, $after after)"
+
+# --- As a service: a graceful restart with a request in flight ------------------
+& "$Apache\bin\httpd.exe" -k install -n OrxTest -f "$Apache\conf\orx.conf" 2>&1 | Out-Null
+Start-Service OrxTest
+Start-Sleep 5
+$svc = (Get-CimInstance Win32_Service -Filter "Name = 'OrxTest'").ProcessId
+$trace += "  service: httpd $svc; hosts: $(pool)"
+$r = get '/rexx/hello.rex?service=1'
+check 'served by Apache as a service' ($r.body -eq 'hello service=1 GET') "[$($r.code)] [$($r.body)]"
+$old = (hosts | Where-Object { $_.ParentProcessId -eq $svc }).ProcessId
+$slow = Start-Process curl.exe -ArgumentList '-s', '-m', '30', '-o', "$env:TEMP\orx-slow.txt",
+          "http://127.0.0.1:$Port/rexx/slow.rex" -NoNewWindow -PassThru
+Start-Sleep 1
+& "$Apache\bin\httpd.exe" -k restart -n OrxTest 2>&1 | Out-Null
+Start-Sleep 4
+$new = (hosts | Where-Object { $_.ParentProcessId -eq $svc }).ProcessId
+$trace += "  restarted: old master $old, new $new; hosts: $(pool)"
+$r = get '/rexx/hello.rex?restarted=1'
+check 'after a restart, a new host serves' (@($new).Count -eq 1 -and $new -ne $old -and
+      $r.body -eq 'hello restarted=1 GET') "[$($r.body)] (old $old, new $new)"
+$slow.WaitForExit(30000) | Out-Null
+$body = (Get-Content "$env:TEMP\orx-slow.txt" -Raw)
+check 'the request in flight finished' ($body -and $body.Trim() -eq 'slow done') "[$body]"
+$t0 = Get-Date
+while ((Get-Process -Id $old -ErrorAction SilentlyContinue) -and ((Get-Date) - $t0).TotalSeconds -lt 15) { Start-Sleep 0.5 }
+check 'the old host drained and ended' (-not (Get-Process -Id $old -ErrorAction SilentlyContinue)) "($(pool))"
+Stop-Service OrxTest
+Start-Sleep 3
+check 'stopping the service ends its hosts' (@(hosts).Count -eq 0) "($(pool))"
+& "$Apache\bin\httpd.exe" -k uninstall -n OrxTest 2>&1 | Out-Null
 
 # --- The error log -------------------------------------------------------------
 "--- requests ---"
