@@ -265,6 +265,19 @@ $trace += "  8 at once: $(($pids | ForEach-Object { $_.Substring(0, [Math]::Min(
 check '8 requests at once, served by several processes' ($good.Count -eq 8 -and $distinct.Count -ge 2) `
       "($($good.Count) good answers, processes: $($distinct -join ' '))"
 
+# --- Idle children to spare are retired, one every 10 s, down to the minimum --
+$m = (hosts | Where-Object { $_.ParentProcessId -eq $httpd.Id }).ProcessId
+$grown = @(hosts | Where-Object { $_.ParentProcessId -eq $m }).Count
+$t0 = Get-Date
+while (@(hosts | Where-Object { $_.ParentProcessId -eq $m }).Count -gt 2 -and ((Get-Date) - $t0).TotalSeconds -lt 40) {
+    Start-Sleep 1
+}
+$left = @(hosts | Where-Object { $_.ParentProcessId -eq $m }).Count
+$trace += "  shrunk from $grown to $left in $([int]((Get-Date) - $t0).TotalSeconds) s; hosts: $(pool)"
+check 'the pool shrinks back to its minimum' ($grown -gt 2 -and $left -eq 2) "($grown, then $left)"
+$r = get '/rexx/hello.rex?shrunk=1'
+check 'and serves' ($r.body -eq 'hello shrunk=1 GET') "[$($r.body)]"
+
 # --- The host dies: a child, then the master ---------------------------------
 $c = (hosts | Where-Object { $_.ParentProcessId -eq $master.ProcessId } | Select-Object -First 1)
 Stop-Process -Id $c.ProcessId -Force
