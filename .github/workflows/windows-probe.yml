@@ -7,7 +7,9 @@ name: Windows probe
 
 on:
   push:
-    branches: [windows-probe]
+    paths:
+      - 'probes/windows/**'
+      - '.github/workflows/windows-probe.yml'
   workflow_dispatch:
 
 env:
