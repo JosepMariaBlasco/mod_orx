@@ -167,9 +167,10 @@ OoRexxPreload "$root/htdocs/rexx/Greeting.cls"
 
 $log = "$Apache\logs\orx-error.log"
 Remove-Item $log -ErrorAction SilentlyContinue
-# rexx.dll beside oorexx-host.exe, found there first (a service gets no PATH
-# of ours); rexx.exe stays where it is, for mod_cgi.
-Copy-Item "$OoRexx\*.dll", "$OoRexx\rxapi.exe" "$Apache\bin" -Force
+# The host finds rexx.dll on the PATH it inherits from Apache. Not a copy of
+# the DLLs beside it: rexx.dll needs the rest of its folder (rexx.img; a
+# copy alone dies at once with STATUS_BREAKPOINT, measured).
+$env:PATH = "$OoRexx;$env:PATH"
 $env:OORX_TRACE = '1'           # the host's children trace every step (stderr)
 & "$Apache\bin\httpd.exe" -t -f "$Apache\conf\orx.conf"
 check 'configuration' ($LASTEXITCODE -eq 0)
@@ -291,6 +292,9 @@ check 'when Apache dies, its hosts die with it (job)' ($before -ge 3 -and $after
 
 # --- As a service: a graceful restart with a request in flight ------------------
 & "$Apache\bin\httpd.exe" -k install -n OrxTest -f "$Apache\conf\orx.conf" 2>&1 | Out-Null
+# A service does not get our PATH: give it one, in its Environment value.
+New-ItemProperty -Path HKLM:\SYSTEM\CurrentControlSet\Services\OrxTest -Name Environment `
+    -PropertyType MultiString -Value @("PATH=$OoRexx;$env:SystemRoot\system32;$env:SystemRoot") -Force | Out-Null
 Start-Service OrxTest
 Start-Sleep 5
 $svc = (Get-CimInstance Win32_Service -Filter "Name = 'OrxTest'").ProcessId

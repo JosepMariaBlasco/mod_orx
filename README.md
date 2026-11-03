@@ -156,8 +156,11 @@ build.cmd C:\path\to\ooRexx C:\Apache24
 `oorexx-host.exe` in `build\`. Copy `mod_orx.so` to Apache's `modules\`
 and `oorexx-host.exe` to Apache's `bin\`, where the module looks for it by
 default (a relative `OoRexxHost` is relative to `ServerRoot`). The host
-needs `rexx.dll` and `rexxapi.dll`: on the `PATH` Apache runs with or,
-simplest, beside `oorexx-host.exe`. Apache may run as a service.
+finds `rexx.dll` on the `PATH` Apache runs with: put ooRexx's folder there
+(for a service, in the system `PATH`, or in the service's own
+`Environment` value in the registry). Do not copy the DLLs beside the host:
+`rexx.dll` needs the rest of its folder, and a copy alone fails at once.
+Apache may run as a service.
 
 What differs from Unix, none of it visible to programs:
 
