@@ -227,6 +227,7 @@ $text = Get-Content -Raw $Out
 $counts = ($text -split "`r?`n" | Where-Object { $_ -match '^(Tests ran|Assertions|Failures|Errors|Skipped files|Messages|Logged messages):' }) -join '; '
 "COUNTS $Handler $counts"
 $lines = @(Get-Content $log -ErrorAction SilentlyContinue)
+Copy-Item $log "$Out.error.log" -ErrorAction SilentlyContinue
 "ERRORLOG $Handler $($lines.Count) line(s)"
 $lines | Select-Object -First 15 | ForEach-Object { "  log: $_" }
 $ran = $text -match 'Tests ran:'

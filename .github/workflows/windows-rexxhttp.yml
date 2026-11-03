@@ -84,6 +84,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rexxhttp-suite-windows
-          path: |
-            ${{ runner.temp }}/suite-*.txt
-            ${{ env.APACHE }}/logs/*.log
+          path: ${{ runner.temp }}/suite-*
