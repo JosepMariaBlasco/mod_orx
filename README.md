@@ -162,12 +162,15 @@ finds `rexx.dll` on the `PATH` Apache runs with: put ooRexx's folder there
 `rexx.dll` needs the rest of its folder, and a copy alone fails at once.
 Apache may run as a service.
 
-What differs from Unix, none of it visible to programs:
+What differs from Unix (only the output of commands, below, is visible to
+programs):
 
 - Only Apache's parent process starts the host (mpm_winnt's child process
   reads the configuration too). The host is in a job that ends with
   Apache; a thread of the module restarts it if it dies, with the same
-  waits as on Unix.
+  waits as on Unix. If Apache's parent dies without stopping, the job
+  kills the host at once, requests in flight included (on Linux the host
+  drains).
 - The socket's ACL lets in only the account Apache runs as, SYSTEM and the
   Administrators (by default, any authenticated user could connect).
 - The host's children take connections one at a time, under a mutex:
@@ -177,7 +180,11 @@ What differs from Unix, none of it visible to programs:
   that lasts as long as the host process: `.Stream` cannot open a pipe by
   name there, and there is no `/dev/fd`. So the output of a command a
   program runs (`Address SYSTEM`) goes to the client, as it does under
-  mod_cgi; on Unix it is discarded.
+  mod_cgi; on Unix it is discarded. A command that outlives the
+  program (one started in the background with `start /b`, say) still holds
+  that pipe: whatever it writes later goes into the response of a later
+  request to that host process, whoever made it. Send such a command's
+  output elsewhere (`> NUL`, a file).
 - `OORX_TRACE=1` in Apache's environment makes the host's processes log
   every step of each connection to the error log.
 

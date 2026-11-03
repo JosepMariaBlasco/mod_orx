@@ -1672,7 +1672,10 @@ static void append_arg(std::string &cmd, const std::string &a)
 /* cancelled (CancelSynchronousIo: closing the socket's handle does not end */
 /* a blocking accept on AF_UNIX, measured), again every 100 ms until the   */
 /* child is gone, in case the cancel came just before the accept began; a  */
-/* connection taken just before is still served. Draining, the child stops */
+/* connection taken just before is still served. The cancel and the end of */
+/* the accept go under one lock (g_wlock), so that a cancel meant for the  */
+/* accept never reaches the I/O of a connection the child has just taken   */
+/* (serve's send and recv are synchronous I/O too). Draining, the child stops */
 /* once it has waited 200 ms with nothing to take: the module has removed  */
 /* the socket's path by then, so nothing new can arrive.                   */
 #define DRAIN_IDLE_MS 200
@@ -1681,6 +1684,16 @@ static volatile LONG      g_wstate = W_BUSY;
 static volatile long long g_wait_since;
 static volatile LONG      g_closing;        /* the watcher said: leave       */
 static HANDLE             g_leave;          /* set: stop waiting, leave      */
+static SRWLOCK            g_wlock = SRWLOCK_INIT; /* W_ACCEPT -> W_BUSY, cancel */
+
+/* Cancel the main thread's accept, if it is still in one.                  */
+static void cancel_accept(HANDLE main_thread)
+{
+    AcquireSRWLockExclusive(&g_wlock);
+    if (InterlockedCompareExchange(&g_wstate, 0, 0) == W_ACCEPT)
+        CancelSynchronousIo(main_thread);
+    ReleaseSRWLockExclusive(&g_wlock);
+}
 
 static void accept_watch(int me, HANDLE main_thread, HANDLE stop, HANDLE master)
 {
@@ -1695,7 +1708,7 @@ static void accept_watch(int me, HANDLE main_thread, HANDLE stop, HANDLE master)
         if (draining) Sleep(20);               /* the stop events stay set */
         LONG st = InterlockedCompareExchange(&g_wstate, 0, 0);
         if (InterlockedCompareExchange(&g_closing, 0, 0)) {
-            if (st == W_ACCEPT) CancelSynchronousIo(main_thread);
+            cancel_accept(main_thread);
             Sleep(80);
             continue;
         }
@@ -1705,7 +1718,7 @@ static void accept_watch(int me, HANDLE main_thread, HANDLE stop, HANDLE master)
             TRACE(retired ? "retired" : "drained");
             InterlockedExchange(&g_closing, 1);
             SetEvent(g_leave);
-            if (st == W_ACCEPT) CancelSynchronousIo(main_thread);
+            cancel_accept(main_thread);
         }
     }
 }
@@ -1738,10 +1751,12 @@ static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, HANDLE 
         if (InterlockedCompareExchange(&g_closing, 0, 0)) { ReleaseMutex(mutex); quit(0); }
         InterlockedExchange(&g_wstate, W_ACCEPT);
         SOCKET fd = accept(lsock, NULL, NULL);
+        int e = fd == INVALID_SOCKET ? WSAGetLastError() : 0;
+        AcquireSRWLockExclusive(&g_wlock);         /* no cancel in flight now */
         InterlockedExchange(&g_wstate, W_BUSY);
+        ReleaseSRWLockExclusive(&g_wlock);
         ReleaseMutex(mutex);
         if (fd == INVALID_SOCKET) {
-            int e = WSAGetLastError();
             TRACE("accept: error %lld", e);
             if (InterlockedCompareExchange(&g_closing, 0, 0)) quit(0);   /* done */
             if (e == WSAEINTR || e == WSAECONNABORTED || e == WSAECONNRESET) continue;

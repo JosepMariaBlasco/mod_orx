@@ -839,7 +839,8 @@ static apr_status_t end_generation(void *data)
 static int secure_socket(server_rec *s, const char *path)
 {
     HANDLE tok = NULL, h;
-    char tu[256], *sid = NULL, *sddl;
+    DWORD64 tu[32];                   /* a TOKEN_USER, aligned as one      */
+    char *sid = NULL, *sddl;
     DWORD len = 0;
     PSECURITY_DESCRIPTOR sd = NULL;
     PACL dacl = NULL;
@@ -1265,19 +1266,24 @@ static int wait_accept(request_rec *r, oorx_sock_t fd, int seconds, const char *
         break;
     }
 #endif
-    if (n == 0) {
 #ifdef _WIN32
-        /* Whether something had arrived after all (WSAPoll missing it).    */
+    if (n == 0) {
+        /* Something may have arrived after all, WSAPoll missing it: then   */
+        /* the ACCEPT is there to read, and the request goes on (noted, to  */
+        /* learn whether it ever happens).                                  */
         u_long ready = 0;
-        ioctlsocket(fd, FIONREAD, &ready);
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-                      "mod_orx: no oorexx-host process free within %d s "
-                      "(%s; %lu bytes waiting)", seconds, directive, ready);
-#else
+        if (ioctlsocket(fd, FIONREAD, &ready) == 0 && ready > 0) {
+            ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r,
+                          "mod_orx: WSAPoll timed out with %lu bytes waiting (%s)",
+                          ready, directive);
+            n = 1;
+        }
+    }
+#endif
+    if (n == 0) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
                       "mod_orx: no oorexx-host process free within %d s "
                       "(%s)", seconds, directive);
-#endif
         return -1;
     }
     if (n < 0 || oorx_recv_header(fd, &type, &flags, &len) < 0 || type != OORX_ACCEPT ||
