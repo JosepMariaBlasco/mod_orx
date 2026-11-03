@@ -395,6 +395,9 @@ typedef struct {
     int         retired;       /* the generation is over: do not restart     */
     int         lfd;           /* the listening socket (-1 once closed)      */
     const char *path;          /* its path                                   */
+    dev_t       dev;           /* what the path named when it was bound:     */
+    ino_t       ino;           /* only that is unlinked when the generation  */
+                               /* ends (another Apache may own it by then)   */
     const char *host;
     char      **argv;
     server_rec *s;
@@ -507,7 +510,14 @@ static apr_status_t end_generation(void *data)
     if (getpid() != g->parent) return APR_SUCCESS;   /* never in a worker */
     g->retired = 1;
     if (g->lfd >= 0) {
-        unlink(g->path);              /* first: nothing new reaches it     */
+        /* First: nothing new reaches it. But only if the path still names */
+        /* this generation's socket: after a graceful-stop, the old parent */
+        /* gets here when its last request is done, and a new Apache may   */
+        /* have bound its own socket at the same path meanwhile (measured: */
+        /* every request of the new one then failed with ENOENT).          */
+        struct stat st;
+        if (lstat(g->path, &st) == 0 && st.st_dev == g->dev && st.st_ino == g->ino)
+            unlink(g->path);
         close(g->lfd);
         g->lfd = -1;
     }
@@ -615,6 +625,17 @@ static int oorx_post_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *pte
         return HTTP_INTERNAL_SERVER_ERROR;
     }
     if ((g->lfd = bind_socket(s, g->path)) < 0) return HTTP_INTERNAL_SERVER_ERROR;
+    {
+        struct stat st;
+        if (lstat(g->path, &st) < 0) {
+            ap_log_error(APLOG_MARK, APLOG_CRIT, errno, s, "mod_orx: cannot stat %s", g->path);
+            close(g->lfd); g->lfd = -1;
+            unlink(g->path);
+            return HTTP_INTERNAL_SERVER_ERROR;
+        }
+        g->dev = st.st_dev;
+        g->ino = st.st_ino;
+    }
 
     {
         int i, n = g_preload ? g_preload->nelts : 0, a = 11;

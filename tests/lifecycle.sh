@@ -118,9 +118,28 @@ while [ "$(hosts)" != 0 ] && [ $(($(date +%s) - T0)) -lt 10 ]; do sleep 0.2; don
 check "the program in flight finished" "$(cat "$MARK")" finished
 check "no host left" "$(hosts)" 0
 check "the socket is gone" "$(ls /var/run/apache2/oorexx.sock 2>/dev/null)" ""
+
+echo "== A new Apache starts while the old one finishes a graceful-stop"
+# graceful-stop removes the pid file and closes the ports at once, but the
+# old parent clears its configuration (and its generation ends) only when
+# its last request is done: by then a new Apache may own the socket's path.
+apachectl -k start; sleep 3
+P=$(parent)
+get 'slow.rex?s=4' > /tmp/lc.old &
+sleep 1; apachectl -k graceful-stop; sleep 1
+apachectl -k start; sleep 2
+wait                            # the old Apache's last request is done
+T0=$(date +%s)                  # and then the old parent ends
+while kill -0 "$P" 2>/dev/null && [ $(($(date +%s) - T0)) -lt 10 ]; do sleep 0.2; done
+check "the old Apache's request answered" "$(cat /tmp/lc.old)" 200
+check "the old Apache ended" "$(kill -0 "$P" 2>/dev/null && echo running)" ""
+check "the new Apache's socket is still there" \
+      "$([ -S /var/run/apache2/oorexx.sock ] && echo yes)" yes
+check "and serves" "$(get 'slow.rex?s=0')" 200
+rm -f /tmp/lc.old
 check "no segfault of Apache in the whole run" "$(( $(segfaults) - S0 ))" 0
 
 a2disconf oorexx-lifecycle >/dev/null; rm -rf "$LAB" "$MARK"
-apachectl -k start; sleep 1
+apachectl -k graceful; sleep 1
 echo "== $FAILS failure(s)"
 [ $FAILS = 0 ]
