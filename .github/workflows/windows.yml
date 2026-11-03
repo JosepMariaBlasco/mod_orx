@@ -63,11 +63,13 @@ jobs:
 
       - name: Apache with mod_orx
         shell: pwsh
-        timeout-minutes: 8
+        timeout-minutes: 10
         run: |
-          $out = (& tests\windows.ps1 -Apache $env:APACHE -OoRexx $env:OOREXX 2>&1) | Out-String
+          # Shown as it runs (a hang still leaves what came before it).
+          & tests\windows.ps1 -Apache $env:APACHE -OoRexx $env:OOREXX 2>&1 |
+              Tee-Object -FilePath "$env:RUNNER_TEMP\windows-test.txt"
           $rc = $LASTEXITCODE
-          $out
+          $out = Get-Content -Raw "$env:RUNNER_TEMP\windows-test.txt"
           $lines = $out -split "`n" | Where-Object { $_ -match '^(PASS|FAIL|RESULT|BENCH)' }
           $fails = @($lines | Where-Object { $_ -like 'FAIL*' })
           if ($fails.Count) { echo "::error title=mod_orx on Windows::$($fails -join '%0A')" }

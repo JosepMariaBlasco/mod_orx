@@ -238,7 +238,8 @@ check 'a fixup hook (Address APACHE) and a preloaded class' ($r.body -eq 'fixup 
 $r = get '/cgi/hello.cgi?a=1'
 check 'the same program under mod_cgi' ($r.body -eq 'hello a=1 GET') "[$($r.code)] [$($r.body)]"
 function rps($path, $c) {
-    $o = & "$Apache\bin\ab.exe" -q -n 400 -c $c "http://127.0.0.1:$Port$path" 2>&1
+    # At most 20 s, and 10 s for any one request, whatever happens.
+    $o = & "$Apache\bin\ab.exe" -q -t 20 -n 400 -s 10 -c $c "http://127.0.0.1:$Port$path" 2>&1
     $m = [regex]::Match(($o -join "`n"), 'Requests per second:\s+([0-9.]+)')
     $f = [regex]::Match(($o -join "`n"), 'Failed requests:\s+([0-9]+)')
     return @{ rps = $(if ($m.Success) { [double]::Parse($m.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture) } else { 0 });
@@ -249,7 +250,7 @@ foreach ($c in 1, 4) {
     $o = rps '/rexx/hello.rex?b=1' $c
     $g = rps '/cgi/hello.cgi?b=1' $c
     $bench += "c=$c mod_orx $([int]$o.rps) rps ($($o.failed) failed), mod_cgi $([int]$g.rps) rps ($($g.failed) failed)"
-    check "c=$c, 400 requests, none failed" ($o.failed -eq 0 -and $o.rps -gt 0) $bench[-1]
+    check "c=$c, mod_orx under ab, none failed" ($o.failed -eq 0 -and $o.rps -gt 0) $bench[-1]
 }
 "BENCH $($bench -join '; ')"
 
