@@ -306,7 +306,9 @@ static void out_close(out_channel &o)
 /* the process's standard output handle from birth. The master makes it the */
 /* write end of a pipe that lasts as long as the child, and hands the child */
 /* the read end too, opened for overlapped I/O. One read is always pending  */
-/* on it, from one phase to the next.                                       */
+/* on it, from one phase to the next; so the pump is one thread for the     */
+/* child's whole life, since Windows cancels a thread's pending I/O when    */
+/* the thread ends (measured: ERROR_OPERATION_ABORTED in the next phase).   */
 /*                                                                          */
 /* There is no EOF per phase. The end is safe to tell once the program has  */
 /* ended (g_phase_done): every write it made has returned, so what it wrote */
@@ -315,7 +317,9 @@ static void out_close(out_channel &o)
 /* completed -- in that order, since a read may complete between the two   */
 /* checks, but nothing can enter the pipe any more.                         */
 static HANDLE     g_out_r = INVALID_HANDLE_VALUE;
-static HANDLE     g_phase_done;
+static HANDLE     g_phase_start;       /* auto-reset: a phase has begun     */
+static HANDLE     g_phase_done;        /* manual: the program has ended     */
+static HANDLE     g_phase_flushed;     /* auto-reset: all of it forwarded   */
 static OVERLAPPED g_ov;
 static char       g_obuf[OORX_CHUNK];
 static bool       g_read_pending = false;
@@ -378,18 +382,30 @@ static void output_pump(void)
     if (have) send_frame(OORX_DATA, 0, held.data(), (uint32_t)held.size());
 }
 
+/* The pump's thread: one phase after another.                              */
+static void pump_thread(void)
+{
+    for (;;) {
+        WaitForSingleObject(g_phase_start, INFINITE);
+        output_pump();
+        SetEvent(g_phase_flushed);
+    }
+}
+
 static bool out_open(out_channel &o, std::string &name)
 {
+    (void)o;
     ResetEvent(g_phase_done);
-    o.pump = std::thread(output_pump);
+    SetEvent(g_phase_start);
     name = "STDOUT";
     return true;
 }
 
 static void out_close(out_channel &o)
 {
+    (void)o;
     SetEvent(g_phase_done);
-    o.pump.join();                     /* all output forwarded */
+    WaitForSingleObject(g_phase_flushed, INFINITE);   /* all output forwarded */
 }
 #endif
 
@@ -1771,8 +1787,11 @@ static int run_child(const char *spec, int max_requests)
     if (!g_slots) return 1;
     memset(&g_ov, 0, sizeof g_ov);
     g_ov.hEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+    g_phase_start = CreateEventA(NULL, FALSE, FALSE, NULL);
     g_phase_done = CreateEventA(NULL, TRUE, FALSE, NULL);
-    if (!g_ov.hEvent || !g_phase_done) return 1;
+    g_phase_flushed = CreateEventA(NULL, FALSE, FALSE, NULL);
+    if (!g_ov.hEvent || !g_phase_start || !g_phase_done || !g_phase_flushed) return 1;
+    std::thread(pump_thread).detach();
     child_main(me, lsock, stop, master, max_requests);
     return 0;
 }

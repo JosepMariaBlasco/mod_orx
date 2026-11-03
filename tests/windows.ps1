@@ -32,7 +32,7 @@ function get($path, $method = 'GET', $body = $null) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $r = (& curl.exe @a) -join "`n"
     $i = $r.LastIndexOf("`n")
-    $res = @{ code = $r.Substring($i + 1); body = $r.Substring(0, [Math]::Max($i, 0)) }
+    $res = @{ code = $r.Substring($i + 1); body = $r.Substring(0, [Math]::Max($i, 0)).TrimEnd("`r", "`n") }
     $script:trace += "  $($res.code) $path $([Math]::Round($sw.Elapsed.TotalSeconds, 2)) s; hosts: $(pool)"
     return $res
 }
@@ -168,7 +168,7 @@ $r = get '/rexx/post.rex' 'POST' "@$env:TEMP\orx-post.txt"
 check 'the request body (70 KB)' ($r.body -eq 'got 70004 41424344') "[$($r.body)]"
 
 $r = get '/rexx/where.rex'
-check 'runs in its directory' ($r.body -replace '\\', '/' -eq "$root/htdocs/rexx") "[$($r.body)]"
+check 'runs in its directory' (($r.body -replace '\\', '/') -eq "$root/htdocs/rexx") "[$($r.body)]"
 
 # An explicit flush reaches the client early: time to the first byte.
 $t = & curl.exe -s -m 30 -o NUL -w '%{time_starttransfer} %{time_total}' "http://127.0.0.1:$Port/rexx/flush.rex"
@@ -191,7 +191,7 @@ check 'OoRexxTimeout halts a program' ($secs -lt 8 -and $logtext -match 'loop\.r
 $pids = 1..8 | ForEach-Object -Parallel {
     (curl.exe -s -m 30 -w ' [%{http_code}]' "http://127.0.0.1:$using:Port/rexx/pid.rex") -join ' '
 } -ThrottleLimit 8
-$good = @($pids | Where-Object { $_ -match '^\d+ \[200\]$' })
+$good = @($pids | Where-Object { $_ -match '^\d+\s+\[200\]$' })
 $distinct = @($good | ForEach-Object { ($_ -split ' ')[0] } | Sort-Object -Unique)
 $trace += "  8 at once: $(($pids | ForEach-Object { $_.Substring(0, [Math]::Min(20, $_.Length)) }) -join ' | '); hosts: $(pool)"
 check '8 requests at once, served by several processes' ($good.Count -eq 8 -and $distinct.Count -ge 2) `
