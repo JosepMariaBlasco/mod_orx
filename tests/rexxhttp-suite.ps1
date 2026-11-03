@@ -211,6 +211,12 @@ $httpd = Start-Process "$Apache\bin\httpd.exe" -ArgumentList '-f', "$Apache\conf
 Start-Sleep 4
 $smoke = & curl.exe -s -m 30 -o NUL -w '%{http_code}' http://127.0.0.1:$Port/test/hola
 "SMOKE $Handler /test/hola: $smoke"
+# PROBE (for now): what some of the suite's requests get, raw.
+foreach ($u in '/test/boom', '/test/urlprobe', '/mtx/target.mtx/x/y', '/mtx/spaced%20doc.mtx') {
+    "PROBE GET $u"
+    (& curl.exe -s -m 30 "http://127.0.0.1:$Port$u") | ForEach-Object { "PROBE   $_" }
+}
+"PROBE HEAD -o /dev/null: rc $(& curl.exe -s -m 30 --head -o /dev/null -w '%{http_code}' "http://127.0.0.1:$Port/test/check?q=1"; $LASTEXITCODE)"
 Clear-Content $log -ErrorAction SilentlyContinue      # count only the suite
 
 # PROBE (for now): the suite's client keeps its files in /tmp, which on
