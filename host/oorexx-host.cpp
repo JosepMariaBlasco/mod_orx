@@ -170,6 +170,22 @@ static void err_write(const std::string &m)
 #ifdef _WIN32
 /* A child that cannot go on says why, on its way out (the error log, when  */
 /* mod_orx started the host).                                               */
+/* OORX_TRACE=1 in the environment: every step of a child, on stderr.     */
+static bool g_trace = false;
+static void trace(const char *fmt, long long a = 0, long long b = 0)
+{
+    if (!g_trace) return;
+    char m[200], t[160];
+    snprintf(t, sizeof t, fmt, a, b);
+    snprintf(m, sizeof m, "oorexx-host trace: %lu %llu: %s\n", GetCurrentProcessId(),
+             (unsigned long long)GetTickCount64(), t);
+    err_write(m);
+}
+#define TRACE(...) trace(__VA_ARGS__)
+#else
+#define TRACE(...) ((void)0)
+#endif
+#ifdef _WIN32
 static void die(const char *why)
 {
     char m[200];
@@ -895,12 +911,16 @@ static void serve(oorx_sock_t fd)
     /* may have given up on it (then BEGIN never comes, and we return).     */
     const unsigned char version = OORX_PROTOCOL_VERSION;
     send_frame(OORX_ACCEPT, 0, &version, 1);
+    TRACE("ACCEPT sent, broken %lld", (long long)g_broken);
     if (g_broken) return;
 
     /* BEGIN */
     int type, flags; uint32_t len;
-    if (oorx_recv_header(fd, &type, &flags, &len) < 0 || type != OORX_BEGIN || len < 7)
+    if (oorx_recv_header(fd, &type, &flags, &len) < 0 || type != OORX_BEGIN || len < 7) {
+        TRACE("no BEGIN (type %lld)", (long long)type);
         return;
+    }
+    TRACE("BEGIN, %lld bytes", (long long)len);
     std::string begin(len, '\0');
     if (oorx_read_all(fd, &begin[0], len) < 0) return;
     const unsigned char *b = (const unsigned char *)begin.data();
@@ -1095,6 +1115,7 @@ static void serve(oorx_sock_t fd)
     inst->Terminate();
     if (plugin) plugin->end();
     out_close(och);
+    TRACE("phase done, status %lld", (long long)status);
     send_result(status, has_value ? &value : NULL);
 }
 
@@ -1639,7 +1660,8 @@ static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, int max
     /* The anchor: the first instance of the process (the expensive one),   */
     /* which stays, with the APACHE environment and the preloaded packages. */
     load_anchor();
-    if (!slot_cas(me, SLOT_STARTING, SLOT_IDLE)) quit(0);
+    TRACE("slot %lld: anchor loaded", me);
+    if (!slot_cas(me, SLOT_STARTING, SLOT_IDLE)) { TRACE("slot %lld: not STARTING", me); quit(0); }
 
     bool draining = false;
     for (int served = 0; max_requests <= 0 || served < max_requests; ) {
@@ -1648,16 +1670,20 @@ static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, int max
         int n = WSAPoll(&pf, 1, draining ? 0 : CHILD_POLL_MS);
         if (n == SOCKET_ERROR) die("WSAPoll failed");
         if (!draining && (WaitForSingleObject(stop, 0) == WAIT_OBJECT_0 ||
-                          WaitForSingleObject(master, 0) == WAIT_OBJECT_0))
+                          WaitForSingleObject(master, 0) == WAIT_OBJECT_0)) {
             draining = true;
+            TRACE("draining");
+        }
         if (n == 0 && !draining) {
-            if (slot_get(me) == SLOT_RETIRE) quit(0);
+            if (slot_get(me) == SLOT_RETIRE) { TRACE("retired"); quit(0); }
             continue;
         }
-        if (!slot_cas(me, SLOT_IDLE, SLOT_BUSY)) quit(0);   /* retired */
+        if (n > 0) TRACE("poll: n %lld, revents %lld", n, pf.revents);
+        if (!slot_cas(me, SLOT_IDLE, SLOT_BUSY)) { TRACE("retired (busy)"); quit(0); }
         SOCKET fd = accept(lsock, NULL, NULL);
         if (fd == INVALID_SOCKET) {
             int e = WSAGetLastError();
+            TRACE("accept: error %lld, draining %lld", e, (long long)draining);
             slot_set(me, SLOT_IDLE);
             if (e == WSAEWOULDBLOCK || e == WSAEINTR || e == WSAECONNABORTED ||
                 e == WSAECONNRESET) {
@@ -1669,6 +1695,7 @@ static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, int max
         }
         /* The connection must block (it inherits the listening socket's    */
         /* non-blocking mode), and no command a program runs may inherit it. */
+        TRACE("accepted, served %lld", served);
         u_long blocking = 0;
         ioctlsocket(fd, FIONBIO, &blocking);
         SetHandleInformation((HANDLE)fd, HANDLE_FLAG_INHERIT, 0);
@@ -1677,6 +1704,7 @@ static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, int max
         served++;
         if (!slot_cas(me, SLOT_BUSY, SLOT_IDLE)) quit(0);
     }
+    TRACE("max requests: leaving");
     quit(0);
 }
 
@@ -1825,6 +1853,10 @@ int main(int argc, char **argv)
         }
         else { usage(argv[0]); return EXIT_CONFIG; }
     }
+    {
+        char t[8];
+        g_trace = GetEnvironmentVariableA("OORX_TRACE", t, sizeof t) > 0;
+    }
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
         fprintf(stderr, "oorexx-host: WSAStartup failed\n");
@@ -1909,6 +1941,7 @@ int main(int argc, char **argv)
             if (!procs[i] || WaitForSingleObject(procs[i], 0) != WAIT_OBJECT_0) continue;
             DWORD code = 0;
             GetExitCodeProcess(procs[i], &code);
+            TRACE("master: child %lld ended, status %lld", (long long)g_slots[i].pid, (long long)code);
             if (code != 0)
                 fprintf(stderr, "oorexx-host: child %lu ended with status %lu\n",
                         g_slots[i].pid, code);
@@ -1944,6 +1977,7 @@ int main(int argc, char **argv)
             }
             procs[i] = h;
             g_slots[i].pid = pid;
+            TRACE("master: started child %lld in slot %lld", (long long)pid, i);
             want--;
         }
 

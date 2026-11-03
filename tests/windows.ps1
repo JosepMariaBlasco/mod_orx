@@ -128,6 +128,7 @@ $log = "$Apache\logs\orx-error.log"
 Remove-Item $log -ErrorAction SilentlyContinue
 # The host finds rexx.dll on the PATH it inherits from Apache.
 $env:PATH = "$OoRexx;$env:PATH"
+$env:OORX_TRACE = '1'           # the host's children trace every step (stderr)
 & "$Apache\bin\httpd.exe" -t -f "$Apache\conf\orx.conf"
 check 'configuration' ($LASTEXITCODE -eq 0)
 $httpd = Start-Process "$Apache\bin\httpd.exe" -ArgumentList '-f', "$Apache\conf\orx.conf" `
@@ -226,7 +227,7 @@ check 'when Apache dies, its hosts die with it (job)' ($before -ge 3 -and $after
 "--- requests ---"
 $trace
 "--- error log ---"
-Get-Content $log | Select-Object -Last 40
+Get-Content $log | Where-Object { $_ -notmatch 'trace: .* poll: ' } | Select-Object -Last 150
 $unexpected = Get-Content $log | Where-Object {
     $_ -match '\[(error|crit|alert|emerg)\]' -and $_ -notmatch 'broken\.rex|loop\.rex|ended \(status|ScriptAlias' }
 check 'no unexpected errors in the log' ($unexpected.Count -eq 0) ($unexpected -join ' | ')

@@ -1264,9 +1264,18 @@ static int wait_accept(request_rec *r, oorx_sock_t fd, int seconds, const char *
     }
 #endif
     if (n == 0) {
+#ifdef _WIN32
+        /* Whether something had arrived after all (WSAPoll missing it).    */
+        u_long ready = 0;
+        ioctlsocket(fd, FIONREAD, &ready);
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                      "mod_orx: no oorexx-host process free within %d s "
+                      "(%s; %lu bytes waiting)", seconds, directive, ready);
+#else
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
                       "mod_orx: no oorexx-host process free within %d s "
                       "(%s)", seconds, directive);
+#endif
         return -1;
     }
     if (n < 0 || oorx_recv_header(fd, &type, &flags, &len) < 0 || type != OORX_ACCEPT ||
