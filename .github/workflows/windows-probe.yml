@@ -73,6 +73,15 @@ jobs:
           if (-not $r) { $r = "no RESULT (exit $LASTEXITCODE)" }
           echo "::notice title=API::$r"
 
+      - name: A .Stream on a named pipe (the program's output)
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $out = (& probes\windows\pipestream.exe 2>&1) | Out-String
+          $out
+          $r = ($out -split "`n" | Where-Object { $_ -like 'RESULT*' }) -join '%0A'
+          echo "::notice title=pipestream::$r"
+
       - name: The transports
         shell: pwsh
         run: |

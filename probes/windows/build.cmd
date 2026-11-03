@@ -10,6 +10,7 @@ if not defined VS (echo vswhere found no Visual C++ & exit /b 1)
 call "%VS%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 cd /d "%~dp0"
 cl /nologo /W3 /EHsc /O2 /I"%OO%\api" api.cpp /link "%OO%\api\rexx.lib" "%OO%\api\rexxapi.lib" /OUT:api.exe || exit /b 1
+cl /nologo /W3 /EHsc /O2 /I"%OO%\api" pipestream.cpp /link "%OO%\api\rexx.lib" "%OO%\api\rexxapi.lib" /OUT:pipestream.exe || exit /b 1
 cl /nologo /W3 /O2 transport.c /link ws2_32.lib advapi32.lib /OUT:transport.exe || exit /b 1
 if "%~2"=="" goto done
 set AP=%~2
