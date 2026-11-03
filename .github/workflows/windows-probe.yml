@@ -1,0 +1,67 @@
+# A probe, not a test: what mod_orx would build on in Windows. The ooRexx
+# installer's API (headers, import libraries), and whether several processes
+# can take connections from one endpoint (AF_UNIX, named pipes).
+# Each result is a notice; the job fails only if something does not build.
+
+name: Windows probe
+
+on:
+  push:
+    branches: [windows-probe]
+  workflow_dispatch:
+
+env:
+  OOREXX_FILES: https://sourceforge.net/projects/oorexx/files/oorexx/5.3.0beta
+  OOREXX_REV: "13358"
+
+jobs:
+  probe:
+    name: Windows Server 2022, the probes
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: ooRexx, extracted from the installer
+        shell: pwsh
+        run: |
+          $oo = "$env:RUNNER_TEMP\oorexx"
+          curl.exe -sSfL -o "$env:RUNNER_TEMP\oorexx.exe" "$env:OOREXX_FILES/oorexx-5.3.0-$env:OOREXX_REV.windows.x86_64.exe/download"
+          7z x -y "-o$oo" "$env:RUNNER_TEMP\oorexx.exe" | Out-Null
+          $oo | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          "OOREXX=$oo" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          $v = (& "$oo\rexx.exe" -v | Select-Object -First 1)
+          $os = (Get-CimInstance Win32_OperatingSystem)
+          echo "::notice title=Windows setup::$v; $($os.Caption) build $($os.BuildNumber); $env:NUMBER_OF_PROCESSORS CPUs; api: $((Get-ChildItem "$oo\api" -Name) -join ', ')"
+          # How long an interpreter takes to start: a whole rexx.exe, three times.
+          'say 1' | Out-File -Encoding ascii "$env:RUNNER_TEMP\one.rex"
+          $t = 1..3 | ForEach-Object { [int](Measure-Command { & "$oo\rexx.exe" "$env:RUNNER_TEMP\one.rex" | Out-Null }).TotalMilliseconds }
+          echo "::notice title=rexx start-up::$($t -join ' ms, ') ms"
+
+      - name: Build
+        shell: cmd
+        run: probes\windows\build.cmd "%OOREXX%"
+
+      - name: The API
+        shell: pwsh
+        run: |
+          $out = (& probes\windows\api.exe 2>&1) | Out-String
+          $out
+          $r = ($out -split "`n" | Where-Object { $_ -like 'RESULT*' }) -join ' '
+          if (-not $r) { $r = "no RESULT (exit $LASTEXITCODE)" }
+          echo "::notice title=API::$r"
+
+      - name: The transports
+        shell: pwsh
+        run: |
+          foreach ($m in 'afunix-inherit', 'afunix-dup', 'pipe') {
+            $p = Start-Process -FilePath probes\windows\transport.exe -ArgumentList $m, 3 -NoNewWindow -PassThru `
+                   -RedirectStandardOutput "$env:RUNNER_TEMP\$m.txt"
+            if (-not $p.WaitForExit(60000)) { $p.Kill($true); "(${m}: killed after 60 s)" | Out-File -Append "$env:RUNNER_TEMP\$m.txt" }
+            $out = Get-Content "$env:RUNNER_TEMP\$m.txt" -Raw
+            $out
+            $r = ($out -split "`n" | Where-Object { $_ -like 'RESULT*' }) -join ' '
+            if (-not $r) { $r = "${m}: no RESULT" }
+            $d = ($out -split "`n" | Where-Object { $_ -notlike 'RESULT*' -and $_.Trim() }) -join '%0A'
+            echo "::notice title=$m::$r%0A$d"
+          }
