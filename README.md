@@ -120,8 +120,9 @@ Requirements:
 - ooRexx 5.3.0 (r13358 or later) with its API headers: the `APACHE`
   environment of native programs is a `.CommandHandler`, new in 5.3.0,
   and r13358 has the fixes mod_orx's tests run against (among them
-  [#2135](https://sourceforge.net/p/oorexx/bugs/2135/), see *Where ooRexx
-  keeps its rxapi files*);
+  [#2135](https://sourceforge.net/p/oorexx/bugs/2135/): before it, an
+  Apache started from another user's session, with that user's
+  `XDG_RUNTIME_DIR`, made every new interpreter wait about 2 s for `rxapi`);
 - a C and a C++ compiler.
 
 ```sh
@@ -206,17 +207,6 @@ enough). A file that does not exist is refused when the configuration is
 read; one that fails to load (a syntax error, say) stops the host, with the
 error, its file and its line in the error log, and the host is not
 restarted.
-
-### Where ooRexx keeps its rxapi files
-
-ooRexx puts the files of a user's `rxapi` in `$XDG_RUNTIME_DIR`, or else
-`$TMPDIR`, or else `/tmp`, without checking that the user may write there.
-An Apache started from another user's session (`sudo` keeps
-`XDG_RUNTIME_DIR`) would hand that user's directory to the host, and every
-host process would wait about 2 s for an `rxapi` that cannot start
-(measured). So `oorexx-host` unsets either variable, when it starts, if it
-names a directory it cannot write and search. (Rexx CGIs under mod_cgid
-pay those 2 s on every request in the same situation.)
 
 ### What a host process keeps between phases: `.environment`
 
