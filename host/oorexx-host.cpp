@@ -1604,7 +1604,8 @@ int main(int argc, char **argv)
 /*     slots (a file mapping), the stop event, a handle on the master, and  */
 /*     both ends of its output pipe, the write end as its standard output;  */
 /*   - draining is an event the master sets (the stop pipe on Unix); a      */
-/*     child that sees it, or the master gone, drains and exits;            */
+/*     child that sees it, or the master gone, drains and exits; children   */
+/*     wait in a blocking accept() (see child_main);                        */
 /*   - the master is told to drain by an event too: mod_orx's (--stop-event) */
 /*     or, standalone, its own, set by Ctrl+C. There is no keeper: Apache   */
 /*     never reaps the host on Windows, and mod_orx puts it in a job that   */
@@ -1653,6 +1654,49 @@ static void append_arg(std::string &cmd, const std::string &a)
     cmd += '"';
 }
 
+/* A child waits for a connection in a blocking accept(), and only while it */
+/* is idle. Not in WSAPoll, as on Unix: with several processes polling one  */
+/* inherited AF_UNIX listening socket, Windows often fails to report a      */
+/* pending connection to any of them, until another one arrives or the      */
+/* client gives up (measured: 10 s queue timeouts with idle children). A    */
+/* blocking accept from several processes takes every connection at once,  */
+/* shared among them (measured, v138).                                      */
+/*                                                                          */
+/* A watcher thread does what the poll timeout does on Unix: it sees the    */
+/* stop event, the master's death and a retirement, and when the child must */
+/* stop accepting it closes this process's handle on the socket, which      */
+/* ends the blocking accept. A connection taken just before is still        */
+/* served. Draining, the child stops once it has waited 200 ms with nothing */
+/* to take: the module has removed the socket's path by then, so nothing    */
+/* new can arrive, and whatever is queued an idle child takes at once.      */
+#define DRAIN_IDLE_MS 200
+static volatile LONG      g_waiting;        /* in accept(), idle             */
+static volatile long long g_wait_since;
+static volatile LONG      g_closing;        /* the watcher closed the socket */
+
+static void accept_watch(int me, SOCKET lsock, HANDLE stop, HANDLE master)
+{
+    HANDLE hs[2] = { stop, master };
+    bool draining = false;
+    for (;;) {
+        DWORD w = WaitForMultipleObjects(2, hs, FALSE, 100);
+        if (!draining && (w == WAIT_OBJECT_0 || w == WAIT_OBJECT_0 + 1)) {
+            draining = true;
+            TRACE("draining");
+        }
+        bool waiting = InterlockedCompareExchange(&g_waiting, 0, 0) != 0;
+        bool retired = slot_get(me) == SLOT_RETIRE;
+        if ((retired && waiting) ||
+            (draining && waiting && (long long)GetTickCount64() - g_wait_since >= DRAIN_IDLE_MS)) {
+            TRACE(retired ? "retired" : "drained");
+            InterlockedExchange(&g_closing, 1);
+            closesocket(lsock);
+            return;
+        }
+        if (draining) Sleep(20);               /* the stop events stay set */
+    }
+}
+
 static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, int max_requests)
 {
     std::thread(watchdog).detach();
@@ -1662,47 +1706,34 @@ static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, int max
     load_anchor();
     TRACE("slot %lld: anchor loaded", me);
     if (!slot_cas(me, SLOT_STARTING, SLOT_IDLE)) { TRACE("slot %lld: not STARTING", me); quit(0); }
+    std::thread(accept_watch, me, lsock, stop, master).detach();
 
-    bool draining = false;
     for (int served = 0; max_requests <= 0 || served < max_requests; ) {
-        WSAPOLLFD pf;
-        pf.fd = lsock; pf.events = POLLRDNORM; pf.revents = 0;
-        int n = WSAPoll(&pf, 1, draining ? 0 : CHILD_POLL_MS);
-        if (n == SOCKET_ERROR) die("WSAPoll failed");
-        if (!draining && (WaitForSingleObject(stop, 0) == WAIT_OBJECT_0 ||
-                          WaitForSingleObject(master, 0) == WAIT_OBJECT_0)) {
-            draining = true;
-            TRACE("draining");
-        }
-        if (n == 0 && !draining) {
-            if (slot_get(me) == SLOT_RETIRE) { TRACE("retired"); quit(0); }
-            continue;
-        }
-        if (n > 0) TRACE("poll: n %lld, revents %lld", n, pf.revents);
-        if (!slot_cas(me, SLOT_IDLE, SLOT_BUSY)) { TRACE("retired (busy)"); quit(0); }
+        /* The watcher may have closed the socket while this one served.    */
+        if (InterlockedCompareExchange(&g_closing, 0, 0)) quit(0);
+        g_wait_since = (long long)GetTickCount64();
+        InterlockedExchange(&g_waiting, 1);
         SOCKET fd = accept(lsock, NULL, NULL);
+        InterlockedExchange(&g_waiting, 0);
         if (fd == INVALID_SOCKET) {
             int e = WSAGetLastError();
-            TRACE("accept: error %lld, draining %lld", e, (long long)draining);
-            slot_set(me, SLOT_IDLE);
-            if (e == WSAEWOULDBLOCK || e == WSAEINTR || e == WSAECONNABORTED ||
-                e == WSAECONNRESET) {
-                if (draining) quit(0);    /* the queue is empty: done      */
-                continue;                 /* another child took it          */
-            }
+            TRACE("accept: error %lld", e);
+            if (InterlockedCompareExchange(&g_closing, 0, 0)) quit(0);   /* done */
+            if (e == WSAEINTR || e == WSAECONNABORTED || e == WSAECONNRESET) continue;
             SetLastError((DWORD)e);
             die("accept failed");
         }
-        /* The connection must block (it inherits the listening socket's    */
-        /* non-blocking mode), and no command a program runs may inherit it. */
         TRACE("accepted, served %lld", served);
+        /* Retired while it waited: it serves this one, and leaves.          */
+        bool leave = !slot_cas(me, SLOT_IDLE, SLOT_BUSY);
+        /* No command a program runs may inherit the connection.            */
         u_long blocking = 0;
         ioctlsocket(fd, FIONBIO, &blocking);
         SetHandleInformation((HANDLE)fd, HANDLE_FLAG_INHERIT, 0);
         serve(fd);
         closesocket(fd);
         served++;
-        if (!slot_cas(me, SLOT_BUSY, SLOT_IDLE)) quit(0);
+        if (leave || !slot_cas(me, SLOT_BUSY, SLOT_IDLE)) quit(0);
     }
     TRACE("max requests: leaving");
     quit(0);
@@ -1914,8 +1945,10 @@ int main(int argc, char **argv)
         g_stop_ev = handle_arg(stop_arg);
         SetHandleInformation(g_stop_ev, HANDLE_FLAG_INHERIT, 0);
     }
-    u_long nonblocking = 1;
-    ioctlsocket(lsock, FIONBIO, &nonblocking);
+    /* Blocking: the children wait in accept() (see child_main). The mode   */
+    /* belongs to the socket, shared by every process that holds it.        */
+    u_long blocking = 0;
+    ioctlsocket(lsock, FIONBIO, &blocking);
     SetHandleInformation((HANDLE)lsock, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
     p.lsock = lsock;
 
