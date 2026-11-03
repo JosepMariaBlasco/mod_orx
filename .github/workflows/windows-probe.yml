@@ -74,7 +74,7 @@ jobs:
       - name: The transports
         shell: pwsh
         run: |
-          foreach ($m in 'afunix-inherit', 'afunix-dup', 'pipe') {
+          foreach ($m in 'afunix-inherit', 'afunix-dup', 'pipe', 'afunix-poll') {
             $p = Start-Process -FilePath probes\windows\transport.exe -ArgumentList $m, 3 -NoNewWindow -PassThru `
                    -RedirectStandardOutput "$env:RUNNER_TEMP\$m.txt"
             if (-not $p.WaitForExit(60000)) { $p.Kill($true); "(${m}: killed after 60 s)" | Out-File -Append "$env:RUNNER_TEMP\$m.txt" }

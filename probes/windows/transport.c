@@ -5,6 +5,8 @@
  *   transport.exe afunix-inherit N   one AF_UNIX listening socket, inherited
  *   transport.exe afunix-dup N       the same, passed with WSADuplicateSocket
  *   transport.exe pipe N             a named pipe, one instance per process
+ *   transport.exe afunix-poll N      AF_UNIX as mod_orx uses it: non-blocking
+ *                                    accept after WSAPoll, ACCEPT with a deadline
  *
  * The parent starts N children, then 12 clients at once (threads), each of
  * which connects, sends a byte and reads the PID of the child that served
@@ -287,6 +289,166 @@ static int parent(const char *mode, int nchildren)
     return ok ? 0 : 1;
 }
 
+/* --------------------------------------------- poll, as mod_orx uses it */
+
+/* As oorexx-host's children: the listening socket non-blocking, every child
+ * waits in WSAPoll and races for accept() (a lost race is WSAEWOULDBLOCK).
+ * A connection gets "A" at once (mod_orx's ACCEPT frame), then the request
+ * byte: 'q' means close without an answer; anything else, 200 ms of work
+ * and "PID RACES" back. */
+static int child_afunix_poll(const char *h)
+{
+    WSADATA w; WSAStartup(MAKEWORD(2, 2), &w);
+    SOCKET ls = (SOCKET)_strtoui64(h, NULL, 10);
+    u_long on = 1, off = 0;
+    if (ioctlsocket(ls, FIONBIO, &on) != 0) {
+        printf("  child %lu: FIONBIO on the listening socket: WSA error %d\n",
+               GetCurrentProcessId(), WSAGetLastError());
+        return 1;
+    }
+    long races = 0;
+    for (;;) {
+        WSAPOLLFD pf = { ls, POLLRDNORM, 0 };
+        int n = WSAPoll(&pf, 1, 500);
+        if (n < 0) { printf("  child %lu: WSAPoll: WSA error %d\n", GetCurrentProcessId(), WSAGetLastError()); return 1; }
+        if (n == 0) continue;
+        SOCKET c = accept(ls, NULL, NULL);
+        if (c == INVALID_SOCKET) {
+            if (WSAGetLastError() == WSAEWOULDBLOCK) { races++; continue; }
+            printf("  child %lu: accept: WSA error %d\n", GetCurrentProcessId(), WSAGetLastError());
+            return 1;
+        }
+        ioctlsocket(c, FIONBIO, &off);     /* the connection itself blocks */
+        send(c, "A", 1, 0);
+        char b[4];
+        if (recv(c, b, 1, 0) == 1 && b[0] != 'q') {
+            Sleep(WORK_MS);
+            char out[48];
+            int k = sprintf(out, "%lu %ld", GetCurrentProcessId(), races);
+            send(c, out, k, 0);
+        }
+        closesocket(c);
+    }
+}
+
+/* Waits up to ms for s to be readable: 1 ready, 0 timeout, -1 error. */
+static int readable(SOCKET s, int ms, short *revents)
+{
+    WSAPOLLFD pf = { s, POLLRDNORM, 0 };
+    int n = WSAPoll(&pf, 1, ms);
+    *revents = pf.revents;
+    return n;
+}
+
+static SOCKET poll_connect(void)
+{
+    SOCKET s = socket(AF_UNIX, SOCK_STREAM, 0);
+    struct sockaddr_un sa; memset(&sa, 0, sizeof sa);
+    sa.sun_family = AF_UNIX; strcpy(sa.sun_path, g_path);
+    if (connect(s, (struct sockaddr *)&sa, sizeof sa) != 0) { closesocket(s); return INVALID_SOCKET; }
+    return s;
+}
+
+static long g_races[CLIENTS];
+
+/* As mod_orx's wait_accept and the phase after it. */
+static DWORD WINAPI poll_client(LPVOID arg)
+{
+    int i = (int)(INT_PTR)arg;
+    short re; char b[48];
+    g_pids[i] = 0; g_errors[i] = 0;
+    SOCKET s = poll_connect();
+    if (s == INVALID_SOCKET) { g_errors[i] = WSAGetLastError(); return 0; }
+    if (readable(s, 10000, &re) != 1 || recv(s, b, 1, 0) != 1 || b[0] != 'A') { g_errors[i] = -1; closesocket(s); return 0; }
+    send(s, "x", 1, 0);
+    if (readable(s, 10000, &re) != 1) { g_errors[i] = -2; closesocket(s); return 0; }
+    int n = recv(s, b, sizeof b - 1, 0);
+    closesocket(s);
+    if (n <= 0) { g_errors[i] = -3; return 0; }
+    b[n] = 0;
+    sscanf(b, "%lu %ld", &g_pids[i], &g_races[i]);
+    return 0;
+}
+
+static int parent_poll(int nchildren)
+{
+    HANDLE kids[64]; int nk = 0;
+    WSADATA w; WSAStartup(MAKEWORD(2, 2), &w);
+    if (nchildren < 1 || nchildren > CLIENTS) nchildren = 3;
+    printf("== afunix-poll, %d children\n", nchildren);
+    char tmp[MAX_PATH]; GetTempPathA(sizeof tmp, tmp);
+    snprintf(g_path, sizeof g_path, "%sorx-poll-%lu.sock", tmp, GetCurrentProcessId());
+    DeleteFileA(g_path);
+    SOCKET ls = socket(AF_UNIX, SOCK_STREAM, 0);
+    struct sockaddr_un sa; memset(&sa, 0, sizeof sa);
+    sa.sun_family = AF_UNIX; strcpy(sa.sun_path, g_path);
+    if (bind(ls, (struct sockaddr *)&sa, sizeof sa) != 0 || listen(ls, 64) != 0) {
+        printf("RESULT afunix-poll FAIL: bind/listen WSA error %d\n", WSAGetLastError()); return 1;
+    }
+    SetHandleInformation((HANDLE)ls, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+    for (int i = 0; i < nchildren; i++) {
+        char a[64]; DWORD pid;
+        snprintf(a, sizeof a, "child-afunix-poll %llu", (unsigned long long)ls);
+        if ((kids[nk] = spawn(a, NULL, TRUE, &pid)) != NULL) nk++;
+    }
+    Sleep(1500);
+
+    /* 1. Every child waiting in WSAPoll: 12 clients at once. */
+    double t0 = now_ms();
+    HANDLE th[CLIENTS];
+    for (int i = 0; i < CLIENTS; i++) th[i] = CreateThread(NULL, 0, poll_client, (LPVOID)(INT_PTR)i, 0, NULL);
+    WaitForMultipleObjects(CLIENTS, th, TRUE, 30000);
+    double t1 = now_ms();
+    int answered = 0; long races = 0; DWORD seen[CLIENTS]; int ns = 0;
+    for (int i = 0; i < CLIENTS; i++) {
+        if (!g_pids[i]) { printf("  client %d: no answer (%d)\n", i, g_errors[i]); continue; }
+        answered++;
+        if (g_races[i] > races) races = g_races[i];   /* a child's count so far */
+        int k; for (k = 0; k < ns && seen[k] != g_pids[i]; k++) ;
+        if (k == ns) seen[ns++] = g_pids[i];
+    }
+    printf("  served by:"); for (int i = 0; i < CLIENTS; i++) printf(" %lu", g_pids[i]); printf("\n");
+
+    /* 2. The queue timeout: every child busy, WSAPoll for "A" with 50 ms. */
+    for (int i = 0; i < nk; i++) th[i] = CreateThread(NULL, 0, poll_client, (LPVOID)(INT_PTR)i, 0, NULL);
+    Sleep(50);
+    short re = 0;
+    SOCKET s = poll_connect();
+    double q0 = now_ms();
+    int q = s == INVALID_SOCKET ? -9 : readable(s, 50, &re);
+    double q1 = now_ms();
+    if (s != INVALID_SOCKET) closesocket(s);
+    WaitForMultipleObjects(nk, th, TRUE, 30000);
+    const char *qres = q == 0 ? "timed out" : q == 1 ? "ready (no timeout)" : "error";
+    printf("  queue timeout: WSAPoll for ACCEPT, 50 ms, %d children busy: %s after %.0f ms\n", nk, qres, q1 - q0);
+
+    /* 3. The peer closes without answering: WSAPoll must say so. */
+    Sleep(300);
+    s = poll_connect();
+    int h = -9; double h0 = now_ms(), h1 = h0; int got = -9; char b[8];
+    if (s != INVALID_SOCKET && readable(s, 5000, &re) == 1 && recv(s, b, 1, 0) == 1) {
+        send(s, "q", 1, 0);
+        h0 = now_ms();
+        h = readable(s, 5000, &re);
+        h1 = now_ms();
+        got = recv(s, b, sizeof b, 0);
+    }
+    if (s != INVALID_SOCKET) closesocket(s);
+    char hres[96];
+    snprintf(hres, sizeof hres, "%s after %.0f ms, revents 0x%x, recv %d",
+             h == 1 ? "seen" : h == 0 ? "NOT seen" : "error", h1 - h0, (unsigned)re, got);
+    printf("  peer closes: %s\n", hres);
+
+    for (int i = 0; i < nk; i++) { TerminateProcess(kids[i], 0); CloseHandle(kids[i]); }
+    closesocket(ls); DeleteFileA(g_path);
+    int ok = answered == CLIENTS && ns == nk && nk == nchildren && q == 0 && h == 1 && got == 0;
+    printf("RESULT afunix-poll %s: %d/%d answered, %d of %d children served, %.0f ms (ideal %d), "
+           "lost accept races (largest count seen) %ld; queue timeout: %s; peer close: %s\n",
+           ok ? "ok" : "FAIL", answered, CLIENTS, ns, nchildren, t1 - t0,
+           ((CLIENTS + nchildren - 1) / nchildren) * WORK_MS, races, qres, hres);
+    return ok ? 0 : 1;
+}
+
 /* ---------------------------------------------------------- permissions */
 
 /* afunix-serve PATH: bind PATH and answer "ok" to every connection. */
@@ -338,6 +500,8 @@ int main(int argc, char **argv)
     setvbuf(stdout, NULL, _IONBF, 0);
     if (argc >= 3 && !strcmp(argv[1], "afunix-serve"))   return afunix_serve(argv[2]);
     if (argc >= 3 && !strcmp(argv[1], "afunix-connect")) return afunix_connect(argv[2]);
+    if (argc >= 3 && !strcmp(argv[1], "child-afunix-poll"))    return child_afunix_poll(argv[2]);
+    if (argc >= 2 && !strcmp(argv[1], "afunix-poll"))          return parent_poll(argc >= 3 ? atoi(argv[2]) : 3);
     if (argc >= 3 && !strcmp(argv[1], "child-afunix-inherit")) return child_afunix_inherit(argv[2]);
     if (argc >= 2 && !strcmp(argv[1], "child-afunix-dup"))     return child_afunix_dup();
     if (argc >= 3 && !strcmp(argv[1], "child-pipe"))           return child_pipe(argv[2]);
