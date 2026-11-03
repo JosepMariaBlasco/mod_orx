@@ -1655,24 +1655,26 @@ static void append_arg(std::string &cmd, const std::string &a)
 }
 
 /* A child waits for a connection in a blocking accept(), and only while it */
-/* is idle. Not in WSAPoll, as on Unix: with several processes polling one  */
-/* inherited AF_UNIX listening socket, Windows often fails to report a      */
-/* pending connection to any of them, until another one arrives or the      */
-/* client gives up (measured: 10 s queue timeouts with idle children). A    */
-/* blocking accept from several processes takes every connection at once,  */
-/* shared among them (measured, v138).                                      */
+/* is idle; and only one child at a time, holding the pool's accept mutex,  */
+/* as Apache's own MPMs do. Windows does not hand a connection reliably to  */
+/* one of several processes waiting on one inherited AF_UNIX socket: in    */
+/* WSAPoll, often to none of them; in accept(), often to one that does not */
+/* return until the client gives up (both traced: 10 s queue timeouts with */
+/* idle children).                                                         */
 /*                                                                          */
 /* A watcher thread does what the poll timeout does on Unix: it sees the    */
-/* stop event, the master's death and a retirement, and when the child must */
-/* stop accepting it closes this process's handle on the socket, which      */
-/* ends the blocking accept. A connection taken just before is still        */
-/* served. Draining, the child stops once it has waited 200 ms with nothing */
-/* to take: the module has removed the socket's path by then, so nothing    */
-/* new can arrive, and whatever is queued an idle child takes at once.      */
+/* stop event, the master's death and a retirement. Then a child waiting   */
+/* for the mutex leaves (the leave event), and one in accept() has its     */
+/* handle on the socket closed, which ends the accept; a connection taken   */
+/* just before is still served. Draining, the child stops once it has waited */
+/* 200 ms with nothing to take: the module has removed the socket's path by */
+/* then, so nothing new can arrive.                                         */
 #define DRAIN_IDLE_MS 200
-static volatile LONG      g_waiting;        /* in accept(), idle             */
+enum { W_BUSY = 0, W_MUTEX, W_ACCEPT };
+static volatile LONG      g_wstate = W_BUSY;
 static volatile long long g_wait_since;
 static volatile LONG      g_closing;        /* the watcher closed the socket */
+static HANDLE             g_leave;          /* set: stop waiting, leave      */
 
 static void accept_watch(int me, SOCKET lsock, HANDLE stop, HANDLE master)
 {
@@ -1684,12 +1686,13 @@ static void accept_watch(int me, SOCKET lsock, HANDLE stop, HANDLE master)
             draining = true;
             TRACE("draining");
         }
-        bool waiting = InterlockedCompareExchange(&g_waiting, 0, 0) != 0;
+        LONG st = InterlockedCompareExchange(&g_wstate, 0, 0);
         bool retired = slot_get(me) == SLOT_RETIRE;
-        if ((retired && waiting) ||
-            (draining && waiting && (long long)GetTickCount64() - g_wait_since >= DRAIN_IDLE_MS)) {
+        if (st != W_BUSY && (retired || (draining &&
+            (long long)GetTickCount64() - g_wait_since >= DRAIN_IDLE_MS))) {
             TRACE(retired ? "retired" : "drained");
             InterlockedExchange(&g_closing, 1);
+            SetEvent(g_leave);
             closesocket(lsock);
             return;
         }
@@ -1697,7 +1700,8 @@ static void accept_watch(int me, SOCKET lsock, HANDLE stop, HANDLE master)
     }
 }
 
-static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, int max_requests)
+static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, HANDLE mutex,
+                       int max_requests)
 {
     std::thread(watchdog).detach();
 
@@ -1706,15 +1710,22 @@ static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, int max
     load_anchor();
     TRACE("slot %lld: anchor loaded", me);
     if (!slot_cas(me, SLOT_STARTING, SLOT_IDLE)) { TRACE("slot %lld: not STARTING", me); quit(0); }
+    g_leave = CreateEventA(NULL, TRUE, FALSE, NULL);
+    if (!g_leave) die("no leave event");
     std::thread(accept_watch, me, lsock, stop, master).detach();
 
     for (int served = 0; max_requests <= 0 || served < max_requests; ) {
-        /* The watcher may have closed the socket while this one served.    */
-        if (InterlockedCompareExchange(&g_closing, 0, 0)) quit(0);
         g_wait_since = (long long)GetTickCount64();
-        InterlockedExchange(&g_waiting, 1);
+        InterlockedExchange(&g_wstate, W_MUTEX);
+        HANDLE hs[2] = { mutex, g_leave };
+        DWORD w = WaitForMultipleObjects(2, hs, FALSE, INFINITE);
+        if (w != WAIT_OBJECT_0 && w != WAIT_ABANDONED_0) quit(0);   /* leave */
+        /* The watcher may have closed the socket meanwhile.                */
+        if (InterlockedCompareExchange(&g_closing, 0, 0)) { ReleaseMutex(mutex); quit(0); }
+        InterlockedExchange(&g_wstate, W_ACCEPT);
         SOCKET fd = accept(lsock, NULL, NULL);
-        InterlockedExchange(&g_waiting, 0);
+        InterlockedExchange(&g_wstate, W_BUSY);
+        ReleaseMutex(mutex);
         if (fd == INVALID_SOCKET) {
             int e = WSAGetLastError();
             TRACE("accept: error %lld", e);
@@ -1743,7 +1754,7 @@ static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, int max
 /* matter to a child.                                                       */
 struct pool {
     SOCKET lsock;
-    HANDLE map, stop, self;
+    HANDLE map, stop, self, mutex;
     std::vector<std::string> child_opts;
     std::string exe;
     unsigned long pipes;            /* to name each output pipe uniquely    */
@@ -1774,6 +1785,7 @@ static HANDLE spawn_child(pool &p, int i, DWORD *pid)
     std::vector<HANDLE> inherit;
     inherit.push_back((HANDLE)p.lsock);
     inherit.push_back(p.map); inherit.push_back(p.stop); inherit.push_back(p.self);
+    inherit.push_back(p.mutex);
     inherit.push_back(r); inherit.push_back(w);
     if (nul != INVALID_HANDLE_VALUE) inherit.push_back(nul);
     if (err) inherit.push_back(err);
@@ -1786,11 +1798,11 @@ static HANDLE spawn_child(pool &p, int i, DWORD *pid)
     if (InitializeProcThreadAttributeList(al, 1, 0, &size) &&
         UpdateProcThreadAttribute(al, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, &inherit[0],
                                   inherit.size() * sizeof(HANDLE), NULL, NULL)) {
-        char spec[160];
-        snprintf(spec, sizeof spec, "%d:%llu:%llu:%llu:%llu:%llu", i,
+        char spec[200];
+        snprintf(spec, sizeof spec, "%d:%llu:%llu:%llu:%llu:%llu:%llu", i,
                  (unsigned long long)p.lsock, (unsigned long long)(uintptr_t)p.map,
                  (unsigned long long)(uintptr_t)p.stop, (unsigned long long)(uintptr_t)p.self,
-                 (unsigned long long)(uintptr_t)r);
+                 (unsigned long long)(uintptr_t)r, (unsigned long long)(uintptr_t)p.mutex);
         std::string cmd;
         append_arg(cmd, p.exe);
         cmd.erase(0, 1);
@@ -1824,24 +1836,27 @@ static HANDLE spawn_child(pool &p, int i, DWORD *pid)
     return proc;
 }
 
-/* A child: --child SLOT:SOCKET:MAP:STOP:MASTER:PIPE (handle values).       */
+/* A child: --child SLOT:SOCKET:MAP:STOP:MASTER:PIPE:MUTEX (handle values). */
 static int run_child(const char *spec, int max_requests)
 {
-    unsigned long long v[6];
+    unsigned long long v[7];
     int me;
-    if (sscanf(spec, "%d:%llu:%llu:%llu:%llu:%llu", &me, &v[1], &v[2], &v[3], &v[4], &v[5]) != 6)
+    if (sscanf(spec, "%d:%llu:%llu:%llu:%llu:%llu:%llu", &me, &v[1], &v[2], &v[3], &v[4], &v[5],
+               &v[6]) != 7)
         return EXIT_CONFIG;
     SOCKET lsock  = (SOCKET)v[1];
     HANDLE map    = (HANDLE)(uintptr_t)v[2];
     HANDLE stop   = (HANDLE)(uintptr_t)v[3];
     HANDLE master = (HANDLE)(uintptr_t)v[4];
     g_out_r       = (HANDLE)(uintptr_t)v[5];
+    HANDLE mutex  = (HANDLE)(uintptr_t)v[6];
     /* None of these is for the commands a program may run.                */
     SetHandleInformation((HANDLE)lsock, HANDLE_FLAG_INHERIT, 0);
     SetHandleInformation(map, HANDLE_FLAG_INHERIT, 0);
     SetHandleInformation(stop, HANDLE_FLAG_INHERIT, 0);
     SetHandleInformation(master, HANDLE_FLAG_INHERIT, 0);
     SetHandleInformation(g_out_r, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(mutex, HANDLE_FLAG_INHERIT, 0);
     g_slots = (struct slot *)MapViewOfFile(map, FILE_MAP_ALL_ACCESS, 0, 0, 0);
     if (!g_slots) return 1;
     memset(&g_ov, 0, sizeof g_ov);
@@ -1851,7 +1866,7 @@ static int run_child(const char *spec, int max_requests)
     g_phase_flushed = CreateEventA(NULL, FALSE, FALSE, NULL);
     if (!g_ov.hEvent || !g_phase_start || !g_phase_done || !g_phase_flushed) return 1;
     std::thread(pump_thread).detach();
-    child_main(me, lsock, stop, master, max_requests);
+    child_main(me, lsock, stop, master, mutex, max_requests);
     return 0;
 }
 
@@ -1959,7 +1974,8 @@ int main(int argc, char **argv)
     if (!g_slots) { fprintf(stderr, "oorexx-host: no shared slots\n"); return 1; }
     memset(g_slots, 0, bytes);
     p.stop = CreateEventA(&isa, TRUE, FALSE, NULL);
-    if (!p.stop ||
+    p.mutex = CreateMutexA(&isa, FALSE, NULL);
+    if (!p.stop || !p.mutex ||
         !DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), &p.self,
                          SYNCHRONIZE, TRUE, 0)) {
         fprintf(stderr, "oorexx-host: no stop event\n");
