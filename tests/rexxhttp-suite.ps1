@@ -58,6 +58,11 @@ $fixtures = ('hola multi qs check setck readck setckopts badck ' +
     'crlfhdr crlfrdr crlfck ' +
     'errthenfail chunkecho methodbody ctnorm ctnormsp ctnormqm ctnormws argopt arroutopt headwrap nrdy'
     ) -split ' '
+# On Windows a disk path in Apache's configuration names its drive: Apache
+# gives DocumentRoot the server root's drive, but matches <Directory> and
+# reads SetEnv as written (measured: "/var/www/html/test" alone, 403).
+$dd = $drive
+function disk($t) { $t.Replace('/var/www/html', "$dd/var/www/html").Replace('/opt/rexxhttp-matrix', "$dd/opt/rexxhttp-matrix") }
 $setenv = @{
     polstrict = @('REXXHTTP_ARGPOLICY Strict')
     polbad    = @('REXXHTTP_ARGPOLICY disparate')
@@ -69,7 +74,7 @@ $ht = New-Object Text.StringBuilder
 foreach ($f in $fixtures) {
     Copy-Item "$fx\$f" "$test\$f" -Force
     [void]$ht.Append("<Files $f>`n  SetHandler RexxHTTPCGI`n")
-    if ($setenv.ContainsKey($f)) { foreach ($l in $setenv[$f]) { [void]$ht.Append("  SetEnv $l`n") } }
+    if ($setenv.ContainsKey($f)) { foreach ($l in $setenv[$f]) { [void]$ht.Append("  SetEnv $(disk $l)`n") } }
     [void]$ht.Append("</Files>`n")
 }
 [IO.File]::WriteAllText("$test\.htaccess", $ht.ToString())
@@ -93,8 +98,8 @@ foreach ($z in "$drive\var\www\html\mtx", "$drive\opt\rexxhttp-matrix") {
 $conf = [IO.File]::ReadAllText("$Apache\conf\httpd.conf")
 $conf = $conf -replace '(?m)^Define SRVROOT .*$', "Define SRVROOT `"$root`""
 $conf = $conf -replace '(?m)^Listen .*$', "Listen 127.0.0.1:$Port"
-$conf = $conf -replace '(?m)^DocumentRoot .*$', 'DocumentRoot "/var/www/html"'
-$conf = $conf -replace '(?m)^<Directory "\$\{SRVROOT\}/htdocs">', '<Directory "/var/www/html">'
+$conf = $conf -replace '(?m)^DocumentRoot .*$', "DocumentRoot `"$dd/var/www/html`""
+$conf = $conf -replace '(?m)^<Directory "\$\{SRVROOT\}/htdocs">', "<Directory `"$dd/var/www/html`">"
 # The modules the montage needs are loaded below, as RexxHTTP's Windows
 # installer does (httpd.conf ships them commented out); any line of
 # httpd.conf that loads them already goes.
@@ -189,7 +194,7 @@ Alias /ali /opt/rexxhttp-matrix
     DirectoryIndex index.mtx
 </Directory>
 '@
-[IO.File]::WriteAllText("$Apache\conf\suite.conf", $conf + "`n# The RexxHTTP suite's montage`n" + $montage)
+[IO.File]::WriteAllText("$Apache\conf\suite.conf", $conf + "`n# The RexxHTTP suite's montage`n" + (disk $montage))
 
 if ($Handler -eq 'orx') {
     Copy-Item "$repo\build\oorexx-host.exe" "$Apache\bin\oorexx-host.exe" -Force
