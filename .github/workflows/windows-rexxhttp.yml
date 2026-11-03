@@ -1,0 +1,89 @@
+# The RexxHTTP HTTP test suite on Windows (tests/rexxhttp-suite.ps1): first
+# through mod_cgi, the reference, then through mod_orx.
+
+name: Windows, RexxHTTP suite
+
+on:
+  push:
+    paths:
+      - 'module/**'
+      - 'host/**'
+      - 'include/**'
+      - 'build.cmd'
+      - 'tests/rexxhttp-suite.ps1'
+      - '.github/workflows/windows-rexxhttp.yml'
+  workflow_dispatch:
+
+env:
+  OOREXX_FILES: https://sourceforge.net/projects/oorexx/files/oorexx/5.3.0beta
+  OOREXX_REV: "13358"
+
+jobs:
+  suite:
+    name: Windows Server 2022, RexxHTTP suite
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: ooRexx, extracted from the installer
+        shell: pwsh
+        run: |
+          $oo = "$env:RUNNER_TEMP\oorexx"
+          curl.exe -sSfL -o "$env:RUNNER_TEMP\oorexx.exe" "$env:OOREXX_FILES/oorexx-5.3.0-$env:OOREXX_REV.windows.x86_64.exe/download"
+          7z x -y "-o$oo" "$env:RUNNER_TEMP\oorexx.exe" | Out-Null
+          "OOREXX=$oo" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          & "$oo\rexx.exe" -v | Select-Object -First 1
+
+      - name: Apache (Apache Lounge's zip)
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) mod_orx-ci'
+          $page = (Invoke-WebRequest -UseBasicParsing -UserAgent $ua -TimeoutSec 60 https://www.apachelounge.com/download/).Content
+          $m = [regex]::Match($page, 'href="([^"]*httpd-2\.4\.[0-9]+-[0-9]+-[Ww]in64-VS[0-9]+\.zip)"')
+          if (-not $m.Success) { echo "::error title=Apache::no Win64 zip on the download page"; exit 1 }
+          $url = [Uri]::new([Uri]'https://www.apachelounge.com/download/', $m.Groups[1].Value).AbsoluteUri
+          Invoke-WebRequest -UseBasicParsing -UserAgent $ua -TimeoutSec 180 $url -OutFile "$env:RUNNER_TEMP\httpd.zip"
+          Expand-Archive "$env:RUNNER_TEMP\httpd.zip" C:\Apache -Force
+          $h = Get-ChildItem C:\Apache -Recurse -Filter httpd.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $h) { echo "::error title=Apache::httpd.exe not found in $url"; exit 1 }
+          "APACHE=$($h.Directory.Parent.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          & $h.FullName -v | Select-Object -First 1
+
+      - name: RexxHTTP
+        shell: pwsh
+        run: |
+          curl.exe -sSfL -o "$env:RUNNER_TEMP\rexxhttp.zip" https://rexx.epbcn.com/rexxhttp/rexxhttp-latest.zip
+          Expand-Archive "$env:RUNNER_TEMP\rexxhttp.zip" "$env:RUNNER_TEMP\rexxhttp" -Force
+          "REXXHTTP=$env:RUNNER_TEMP\rexxhttp" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Build
+        shell: cmd
+        run: build.cmd "%OOREXX%" "%APACHE%"
+
+      - name: The suite through mod_cgi (the reference)
+        shell: pwsh
+        timeout-minutes: 18
+        continue-on-error: true
+        run: |
+          & tests\rexxhttp-suite.ps1 -Apache $env:APACHE -OoRexx $env:OOREXX -RexxHTTP $env:REXXHTTP `
+              -Handler cgi -Out "$env:RUNNER_TEMP\suite-cgi.txt"
+          exit $LASTEXITCODE
+
+      - name: The suite through mod_orx
+        shell: pwsh
+        timeout-minutes: 18
+        run: |
+          & tests\rexxhttp-suite.ps1 -Apache $env:APACHE -OoRexx $env:OOREXX -RexxHTTP $env:REXXHTTP `
+              -Handler orx -Out "$env:RUNNER_TEMP\suite-orx.txt"
+          exit $LASTEXITCODE
+
+      - name: The suite's output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rexxhttp-suite-windows
+          path: |
+            ${{ runner.temp }}/suite-*.txt
+            ${{ env.APACHE }}/logs/*.log
