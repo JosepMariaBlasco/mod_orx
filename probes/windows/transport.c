@@ -286,9 +286,57 @@ static int parent(const char *mode, int nchildren)
     return ok ? 0 : 1;
 }
 
+/* ---------------------------------------------------------- permissions */
+
+/* afunix-serve PATH: bind PATH and answer "ok" to every connection. */
+static int afunix_serve(const char *path)
+{
+    WSADATA w; WSAStartup(MAKEWORD(2, 2), &w);
+    DeleteFileA(path);
+    SOCKET ls = socket(AF_UNIX, SOCK_STREAM, 0);
+    struct sockaddr_un sa; memset(&sa, 0, sizeof sa);
+    sa.sun_family = AF_UNIX; strcpy(sa.sun_path, path);
+    if (bind(ls, (struct sockaddr *)&sa, sizeof sa) != 0 || listen(ls, 64) != 0) {
+        printf("serve: bind/listen %s: WSA error %d\n", path, WSAGetLastError());
+        return 1;
+    }
+    printf("serve: listening on %s\n", path);
+    for (;;) {
+        SOCKET c = accept(ls, NULL, NULL);
+        if (c == INVALID_SOCKET) return 1;
+        send(c, "ok", 2, 0);
+        closesocket(c);
+    }
+}
+
+/* afunix-connect PATH: connect, read the reply. Exit 0 if served. */
+static int afunix_connect(const char *path)
+{
+    WSADATA w; WSAStartup(MAKEWORD(2, 2), &w);
+    char user[256]; DWORD ul = sizeof user;
+    if (!GetUserNameA(user, &ul)) strcpy(user, "?");
+    SOCKET s = socket(AF_UNIX, SOCK_STREAM, 0);
+    struct sockaddr_un sa; memset(&sa, 0, sizeof sa);
+    sa.sun_family = AF_UNIX; strcpy(sa.sun_path, path);
+    DWORD tmo = 5000;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tmo, sizeof tmo);
+    if (connect(s, (struct sockaddr *)&sa, sizeof sa) != 0) {
+        printf("connect as %s: refused, WSA error %d\n", user, WSAGetLastError());
+        return 1;
+    }
+    char b[8]; int n = recv(s, b, sizeof b - 1, 0);
+    closesocket(s);
+    if (n <= 0) { printf("connect as %s: connected, no reply (WSA error %d)\n", user, WSAGetLastError()); return 1; }
+    b[n] = 0;
+    printf("connect as %s: served (%s)\n", user, b);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
+    if (argc >= 3 && !strcmp(argv[1], "afunix-serve"))   return afunix_serve(argv[2]);
+    if (argc >= 3 && !strcmp(argv[1], "afunix-connect")) return afunix_connect(argv[2]);
     if (argc >= 3 && !strcmp(argv[1], "child-afunix-inherit")) return child_afunix_inherit(argv[2]);
     if (argc >= 2 && !strcmp(argv[1], "child-afunix-dup"))     return child_afunix_dup();
     if (argc >= 3 && !strcmp(argv[1], "child-pipe"))           return child_pipe(argv[2]);

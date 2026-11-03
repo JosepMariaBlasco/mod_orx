@@ -38,9 +38,21 @@ jobs:
           $t = 1..3 | ForEach-Object { [int](Measure-Command { & "$oo\rexx.exe" "$env:RUNNER_TEMP\one.rex" | Out-Null }).TotalMilliseconds }
           echo "::notice title=rexx start-up::$($t -join ' ms, ') ms"
 
+      - name: Apache (Apache Lounge, through Chocolatey)
+        shell: pwsh
+        run: |
+          choco install apache-httpd -y --no-progress --params '"/installLocation:C:\Apache /noService"' | Select-Object -Last 5
+          $h = Get-ChildItem C:\Apache -Recurse -Filter httpd.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $h) { echo "::error title=Apache::httpd.exe not found under C:\Apache"; exit 1 }
+          $ap = $h.Directory.Parent.FullName
+          "APACHE=$ap" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          $v = (& $h.FullName -v | Select-Object -First 1)
+          $mpm = (& $h.FullName -V | Select-String 'Server MPM') -join ''
+          echo "::notice title=Apache::$v; $mpm; $ap; include: $(Test-Path $ap\include\httpd.h), lib: $((Get-ChildItem $ap\lib -Name) -join ', ')"
+
       - name: Build
         shell: cmd
-        run: probes\windows\build.cmd "%OOREXX%"
+        run: probes\windows\build.cmd "%OOREXX%" "%APACHE%"
 
       - name: The API
         shell: pwsh
@@ -65,3 +77,84 @@ jobs:
             $d = ($out -split "`n" | Where-Object { $_ -notlike 'RESULT*' -and $_.Trim() }) -join '%0A'
             echo "::notice title=$m::$r%0A$d"
           }
+
+      - name: Who may connect to an AF_UNIX socket
+        shell: pwsh
+        run: |
+          $pub = 'C:\Users\Public\orxprobe'
+          New-Item -ItemType Directory -Force $pub | Out-Null
+          Copy-Item probes\windows\transport.exe $pub
+          $pw = 'Orx-Probe-' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '!'
+          net user orxprobe $pw /add | Out-Null
+          Start-Service seclogon -ErrorAction SilentlyContinue
+          $cred = New-Object PSCredential('orxprobe', (ConvertTo-SecureString $pw -AsPlainText -Force))
+          function connectAs($who, $path) {
+            $o = "$pub\out-$([guid]::NewGuid().ToString('N')).txt"
+            try {
+              if ($who -eq 'other') {
+                Start-Process "$pub\transport.exe" -ArgumentList 'afunix-connect', $path -Credential $cred `
+                  -WorkingDirectory $pub -RedirectStandardOutput $o -Wait -ErrorAction Stop
+              } else {
+                Start-Process "$pub\transport.exe" -ArgumentList 'afunix-connect', $path `
+                  -NoNewWindow -RedirectStandardOutput $o -Wait -ErrorAction Stop
+              }
+              return (Get-Content $o -Raw).Trim()
+            } catch { return "could not run as ${who}: $($_.Exception.Message)" }
+          }
+          function serve($path) {
+            $p = Start-Process "$pub\transport.exe" -ArgumentList 'afunix-serve', $path -NoNewWindow -PassThru
+            Start-Sleep 1
+            return $p
+          }
+          $lines = @("runner user: $env:USERNAME")
+          # A: a directory under C:\, with the ACL it inherits from C:\.
+          New-Item -ItemType Directory -Force C:\orxA | Out-Null
+          $p = serve 'C:\orxA\a.sock'
+          $lines += "A, default ACL (C:\orxA): self: $(connectAs self 'C:\orxA\a.sock'); other: $(connectAs other 'C:\orxA\a.sock')"
+          $lines += "   the socket's ACL: $((icacls C:\orxA\a.sock | Select-Object -First 6) -join ' | ')"
+          # B: the same, then the socket's own ACL cut to the runner, SYSTEM and Administrators.
+          icacls C:\orxA\a.sock /inheritance:r /grant:r "${env:USERNAME}:(F)" 'SYSTEM:(F)' 'Administrators:(F)' | Out-Null
+          $lines += "B, the socket's ACL restricted: self: $(connectAs self 'C:\orxA\a.sock'); other: $(connectAs other 'C:\orxA\a.sock')"
+          Stop-Process $p -Force
+          # C: a directory with a restricted ACL; the socket is bound inside it.
+          New-Item -ItemType Directory -Force C:\orxC | Out-Null
+          icacls C:\orxC /inheritance:r /grant:r "${env:USERNAME}:(OI)(CI)(F)" 'SYSTEM:(OI)(CI)(F)' 'Administrators:(OI)(CI)(F)' | Out-Null
+          $p = serve 'C:\orxC\c.sock'
+          $lines += "C, restricted directory: self: $(connectAs self 'C:\orxC\c.sock'); other: $(connectAs other 'C:\orxC\c.sock')"
+          Stop-Process $p -Force
+          $lines | ForEach-Object { $_ }
+          echo "::notice title=AF_UNIX permissions::$($lines -join '%0A')"
+
+      - name: From inside Apache (mpm_winnt)
+        shell: pwsh
+        run: |
+          $ap = $env:APACHE
+          $root = $ap -replace '\\', '/'
+          $mod = ((Resolve-Path probes\windows\mod_orxprobe.so).Path) -replace '\\', '/'
+          @"
+          ServerRoot "$root"
+          ServerName localhost
+          Listen 127.0.0.1:8094
+          LoadModule orxprobe_module "$mod"
+          ErrorLog logs/probe-error.log
+          LogLevel notice
+          PidFile logs/probe.pid
+          DocumentRoot "$root/htdocs"
+          <Location /probe>
+              SetHandler orxprobe
+          </Location>
+          "@ | Out-File -Encoding ascii "$ap\conf\probe.conf"
+          Remove-Item "$ap\logs\probe-error.log" -ErrorAction SilentlyContinue
+          $env:ORX_PROBE_HOST = (Resolve-Path probes\windows\transport.exe).Path
+          $httpd = Start-Process "$ap\bin\httpd.exe" -ArgumentList '-f', "$ap\conf\probe.conf" -NoNewWindow -PassThru
+          Start-Sleep 5
+          $procs = Get-CimInstance Win32_Process | Where-Object { $_.Name -in 'httpd.exe', 'transport.exe' } |
+                   ForEach-Object { "$($_.Name) $($_.ProcessId) (parent $($_.ParentProcessId))" }
+          $r = 1..12 | ForEach-Object -Parallel { curl.exe -s -m 30 http://127.0.0.1:8094/probe } -ThrottleLimit 12
+          $r | ForEach-Object { $_ }
+          $served = @($r | Where-Object { $_ -like 'served by*' })
+          $hosts = @($served | ForEach-Object { ($_ -split ' ')[2] } | Sort-Object -Unique)
+          $log = Get-Content "$ap\logs\probe-error.log" | Where-Object { $_ -match 'orxprobe|error' } | Select-Object -Last 12
+          $log | ForEach-Object { $_ }
+          Get-Process httpd, transport -ErrorAction SilentlyContinue | Stop-Process -Force
+          echo "::notice title=From inside Apache::$($served.Count)/12 served, by $($hosts.Count) host process(es): $($hosts -join ' ')%0Aprocesses: $($procs -join '; ')%0A$(($log | ForEach-Object { $_ -replace '^\[[^\]]*\] ', '' }) -join '%0A')"
