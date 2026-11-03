@@ -19,7 +19,7 @@
 
 param([Parameter(Mandatory)][string]$Apache, [Parameter(Mandatory)][string]$OoRexx,
       [Parameter(Mandatory)][string]$RexxHTTP, [ValidateSet('orx', 'cgi')][string]$Handler = 'orx',
-      [string]$Out = "$env:TEMP\rexxhttp-suite-$Handler.txt")
+      [string]$Out = "$env:TEMP\rexxhttp-suite-$Handler.txt", [int]$Port = 8097)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -88,11 +88,11 @@ foreach ($z in "$drive\var\www\html\mtx", "$drive\opt\rexxhttp-matrix") {
 
 # --- Apache's configuration: its own httpd.conf, plus the montage -----------
 # Apache Lounge's httpd.conf as shipped (its modules, its defaults), with the
-# server root where it is, port 80 (the suite's default base URL) and the
+# server root where it is, its own port (the suite is told: REXXHTTP_TEST_BASEURL) and the
 # document root of the Debian montage.
 $conf = [IO.File]::ReadAllText("$Apache\conf\httpd.conf")
 $conf = $conf -replace '(?m)^Define SRVROOT .*$', "Define SRVROOT `"$root`""
-$conf = $conf -replace '(?m)^Listen .*$', 'Listen 127.0.0.1:80'
+$conf = $conf -replace '(?m)^Listen .*$', "Listen 127.0.0.1:$Port"
 $conf = $conf -replace '(?m)^DocumentRoot .*$', 'DocumentRoot "/var/www/html"'
 $conf = $conf -replace '(?m)^<Directory "\$\{SRVROOT\}/htdocs">', '<Directory "/var/www/html">'
 # The modules the montage needs are loaded below, as RexxHTTP's Windows
@@ -204,7 +204,7 @@ if ($LASTEXITCODE -ne 0) { "RESULT $Handler configuration rejected"; exit 1 }
 $httpd = Start-Process "$Apache\bin\httpd.exe" -ArgumentList '-f', "$Apache\conf\suite.conf" `
            -NoNewWindow -PassThru
 Start-Sleep 4
-$smoke = & curl.exe -s -m 30 -o NUL -w '%{http_code}' http://127.0.0.1/test/hola
+$smoke = & curl.exe -s -m 30 -o NUL -w '%{http_code}' http://127.0.0.1:$Port/test/hola
 "SMOKE $Handler /test/hola: $smoke"
 Clear-Content $log -ErrorAction SilentlyContinue      # count only the suite
 
@@ -214,6 +214,7 @@ New-Item -ItemType Directory -Force "$(Split-Path -Qualifier $RexxHTTP)\tmp" | O
 "PROBE rm: $((Get-Command rm.exe -ErrorAction SilentlyContinue).Source)"
 Push-Location "$RexxHTTP\tests"
 $env:PATH = "$RexxHTTP\tests\framework;$RexxHTTP\tests\http;$env:PATH"
+$env:REXXHTTP_TEST_BASEURL = "http://127.0.0.1:$Port"
 $sw = [Diagnostics.Stopwatch]::StartNew()
 & "$OoRexx\rexx.exe" http\RexxHTTP.testGroup *> $Out
 Pop-Location
