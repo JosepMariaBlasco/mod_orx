@@ -28,9 +28,11 @@ $src = "$RexxHTTP\src"
 $fx = "$RexxHTTP\tests\http\fixtures"
 
 # --- The montage, as RunHTTPTests.rex lays it out ----------------------------
-$deploy = '\var\www\html\RexxHTTP'
-$test = '\var\www\html\test'
-foreach ($d in $deploy, $test, '\var\www\html\mtx\sub', '\opt\rexxhttp-matrix\sub') {
+# Apache resolves a path without a drive against its server root's drive.
+$drive = Split-Path -Qualifier $Apache
+$deploy = "$drive\var\www\html\RexxHTTP"
+$test = "$drive\var\www\html\test"
+foreach ($d in $deploy, $test, "$drive\var\www\html\mtx\sub", "$drive\opt\rexxhttp-matrix\sub") {
     New-Item -ItemType Directory -Force $d | Out-Null
 }
 foreach ($f in 'HTTP.Request.cls', 'HTTP.Response.cls', 'HTTP.OutputStream.cls', 'HTTP.Cookie.cls',
@@ -76,7 +78,7 @@ foreach ($f in $fixtures) {
     "FIXED PAYLOAD LINE 1`nFIXED PAYLOAD LINE 2`nFIXED PAYLOAD LINE 3`n")
 
 # The CGI-contract matrix: the same probe in two zones.
-foreach ($z in '\var\www\html\mtx', '\opt\rexxhttp-matrix') {
+foreach ($z in "$drive\var\www\html\mtx", "$drive\opt\rexxhttp-matrix") {
     Copy-Item "$fx\cgivars" "$z\probe.rxl" -Force
     Copy-Item "$fx\cgivars" "$z\index.rxl" -Force
     [IO.File]::WriteAllText("$z\target.mtx", "matrix target`n")
@@ -204,7 +206,7 @@ Clear-Content $log -ErrorAction SilentlyContinue      # count only the suite
 
 # PROBE (for now): the suite's client keeps its files in /tmp, which on
 # Windows is \tmp on the current drive, and deletes them with rm.
-New-Item -ItemType Directory -Force '\tmp' | Out-Null
+New-Item -ItemType Directory -Force "$(Split-Path -Qualifier $RexxHTTP)\tmp" | Out-Null
 "PROBE rm: $((Get-Command rm.exe -ErrorAction SilentlyContinue).Source)"
 Push-Location "$RexxHTTP\tests"
 $env:PATH = "$RexxHTTP\tests\framework;$RexxHTTP\tests\http;$env:PATH"
