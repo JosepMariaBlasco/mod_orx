@@ -19,17 +19,23 @@ param([Parameter(Mandatory)][string]$Apache, [Parameter(Mandatory)][string]$OoRe
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $fails = 0
+$trace = @()
 function check($name, $ok, $detail = '') {
     if ($ok) { "PASS $name" } else { "FAIL $name $detail"; $script:fails++ }
 }
+function hosts { @(Get-CimInstance Win32_Process -Filter "Name = 'oorexx-host.exe'") }
+function pool { (hosts | ForEach-Object { "$($_.ProcessId)<$($_.ParentProcessId)" }) -join ' ' }
+# Every request leaves a line: status, time, and the host processes after it.
 function get($path, $method = 'GET', $body = $null) {
     $a = @('-s', '-m', '30', '-o', '-', '-w', '\n%{http_code}', "http://127.0.0.1:$Port$path")
     if ($body -ne $null) { $a += @('--data-binary', $body) }
+    $sw = [Diagnostics.Stopwatch]::StartNew()
     $r = (& curl.exe @a) -join "`n"
     $i = $r.LastIndexOf("`n")
-    return @{ code = $r.Substring($i + 1); body = $r.Substring(0, [Math]::Max($i, 0)) }
+    $res = @{ code = $r.Substring($i + 1); body = $r.Substring(0, [Math]::Max($i, 0)) }
+    $script:trace += "  $($res.code) $path $([Math]::Round($sw.Elapsed.TotalSeconds, 2)) s; hosts: $(pool)"
+    return $res
 }
-function hosts { @(Get-CimInstance Win32_Process -Filter "Name = 'oorexx-host.exe'") }
 
 # --- Deploy ---------------------------------------------------------------
 Copy-Item "$repo\build\oorexx-host.exe" "$Apache\bin\oorexx-host.exe" -Force
@@ -129,6 +135,7 @@ $httpd = Start-Process "$Apache\bin\httpd.exe" -ArgumentList '-f', "$Apache\conf
 Start-Sleep 4
 
 # --- The pool ---------------------------------------------------------------
+$trace += "  started: httpd $($httpd.Id); hosts: $(pool)"
 $h = hosts
 $master = $h | Where-Object { $_.ParentProcessId -eq $httpd.Id }
 $children = $h | Where-Object { $master -and $_.ParentProcessId -eq $master.ProcessId }
@@ -181,10 +188,14 @@ $logtext = Get-Content $log -Raw
 check 'OoRexxTimeout halts a program' ($secs -lt 8 -and $logtext -match 'loop\.rex.*phase timeout') "($([int]$secs) s)"
 
 # --- Several processes at once ------------------------------------------------
-$pids = 1..8 | ForEach-Object -Parallel { curl.exe -s -m 30 "http://127.0.0.1:$using:Port/rexx/pid.rex" } -ThrottleLimit 8
-$distinct = @($pids | Where-Object { $_ -match '^\d+$' } | Sort-Object -Unique)
-check '8 requests at once, served by several processes' (@($pids).Count -eq 8 -and $distinct.Count -ge 2) `
-      "($(@($pids).Count) answers, processes: $($distinct -join ' '))"
+$pids = 1..8 | ForEach-Object -Parallel {
+    (curl.exe -s -m 30 -w ' [%{http_code}]' "http://127.0.0.1:$using:Port/rexx/pid.rex") -join ' '
+} -ThrottleLimit 8
+$good = @($pids | Where-Object { $_ -match '^\d+ \[200\]$' })
+$distinct = @($good | ForEach-Object { ($_ -split ' ')[0] } | Sort-Object -Unique)
+$trace += "  8 at once: $(($pids | ForEach-Object { $_.Substring(0, [Math]::Min(20, $_.Length)) }) -join ' | '); hosts: $(pool)"
+check '8 requests at once, served by several processes' ($good.Count -eq 8 -and $distinct.Count -ge 2) `
+      "($($good.Count) good answers, processes: $($distinct -join ' '))"
 
 # --- The host dies: a child, then the master ---------------------------------
 $c = (hosts | Where-Object { $_.ParentProcessId -eq $master.ProcessId } | Select-Object -First 1)
@@ -198,7 +209,7 @@ Start-Sleep 4
 $m2 = hosts | Where-Object { $_.ParentProcessId -eq $httpd.Id }
 $r = get '/rexx/hello.rex?master=killed'
 check 'a killed master is restarted by the module' (@($m2).Count -eq 1 -and $m2.ProcessId -ne $master.ProcessId -and
-      $r.body -eq 'hello master=killed GET') "[$($r.body)]"
+      $r.body -eq 'hello master=killed GET') "[$($r.body)] (old master $($master.ProcessId), now: $(pool))"
 Start-Sleep 1
 $logtext = Get-Content $log -Raw
 check 'the restart is logged' ($logtext -match 'oorexx-host \(pid \d+\) ended')
@@ -212,6 +223,8 @@ $after = @(hosts).Count
 check 'when Apache dies, its hosts die with it (job)' ($before -ge 3 -and $after -eq 0) "($before before, $after after)"
 
 # --- The error log -------------------------------------------------------------
+"--- requests ---"
+$trace
 "--- error log ---"
 Get-Content $log | Select-Object -Last 40
 $unexpected = Get-Content $log | Where-Object {

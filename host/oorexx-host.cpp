@@ -167,6 +167,19 @@ static void err_write(const std::string &m)
 #endif
 }
 
+#ifdef _WIN32
+/* A child that cannot go on says why, on its way out (the error log, when  */
+/* mod_orx started the host).                                               */
+static void die(const char *why)
+{
+    char m[200];
+    snprintf(m, sizeof m, "oorexx-host: child %lu: %s (error %lu)\n", GetCurrentProcessId(),
+             why, GetLastError());
+    err_write(m);
+    quit(1);
+}
+#endif
+
 static void send_log(int level, const char *msg, size_t n)
 {
     std::string payload(1, (char)level);
@@ -334,13 +347,13 @@ static void output_pump(void)
     bool have = false;                 /* goes with FLUSH if a quiet gap    */
     bool ending = false;               /* follows, without it otherwise     */
     for (;;) {
-        if (!start_read()) quit(1);
+        if (!start_read()) die("cannot read the program's output");
         DWORD w;
         if (ending) {
             /* The program has ended: done when the pipe is empty and the   */
             /* pending read has not completed (checked in that order).      */
             DWORD avail = 0;
-            if (!PeekNamedPipe(g_out_r, NULL, 0, NULL, &avail, NULL)) quit(1);
+            if (!PeekNamedPipe(g_out_r, NULL, 0, NULL, &avail, NULL)) die("cannot peek at the output pipe");
             if (avail == 0 && WaitForSingleObject(g_ov.hEvent, 0) == WAIT_TIMEOUT) break;
             w = WaitForSingleObject(g_ov.hEvent, INFINITE);
         } else {
@@ -350,7 +363,7 @@ static void output_pump(void)
         }
         if (w == WAIT_OBJECT_0) {
             long n = finish_read();
-            if (n < 0) quit(1);
+            if (n < 0) die("a read of the program's output failed");
             if (n == 0) continue;
             if (have) send_frame(OORX_DATA, 0, held.data(), (uint32_t)held.size());
             held.assign(g_obuf, (size_t)n);
@@ -360,7 +373,7 @@ static void output_pump(void)
             have = false;
         } else if (w == WAIT_OBJECT_0 + 1) {
             ending = true;
-        } else quit(1);
+        } else die("waiting for the program's output failed");
     }
     if (have) send_frame(OORX_DATA, 0, held.data(), (uint32_t)held.size());
 }
@@ -1617,7 +1630,7 @@ static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, int max
         WSAPOLLFD pf;
         pf.fd = lsock; pf.events = POLLRDNORM; pf.revents = 0;
         int n = WSAPoll(&pf, 1, draining ? 0 : CHILD_POLL_MS);
-        if (n == SOCKET_ERROR) quit(1);
+        if (n == SOCKET_ERROR) die("WSAPoll failed");
         if (!draining && (WaitForSingleObject(stop, 0) == WAIT_OBJECT_0 ||
                           WaitForSingleObject(master, 0) == WAIT_OBJECT_0))
             draining = true;
@@ -1635,7 +1648,8 @@ static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, int max
                 if (draining) quit(0);    /* the queue is empty: done      */
                 continue;                 /* another child took it          */
             }
-            quit(1);
+            SetLastError((DWORD)e);
+            die("accept failed");
         }
         /* The connection must block (it inherits the listening socket's    */
         /* non-blocking mode), and no command a program runs may inherit it. */
@@ -1876,6 +1890,9 @@ int main(int argc, char **argv)
             if (!procs[i] || WaitForSingleObject(procs[i], 0) != WAIT_OBJECT_0) continue;
             DWORD code = 0;
             GetExitCodeProcess(procs[i], &code);
+            if (code != 0)
+                fprintf(stderr, "oorexx-host: child %lu ended with status %lu\n",
+                        g_slots[i].pid, code);
             CloseHandle(procs[i]); procs[i] = NULL;
             g_slots[i].pid = 0; slot_set(i, SLOT_EMPTY);
             /* A child that cannot start (its preload failed) would fail    */
