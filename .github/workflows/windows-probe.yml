@@ -94,9 +94,14 @@ jobs:
           New-Item -ItemType Directory -Force $pub | Out-Null
           Copy-Item probes\windows\transport.exe $pub
           $pw = 'Orx-Probe-' + [guid]::NewGuid().ToString('N').Substring(0, 12) + '!'
-          net user orxprobe $pw /add | Out-Null
+          $sec = ConvertTo-SecureString $pw -AsPlainText -Force
+          try { New-LocalUser -Name orxprobe -Password $sec -PasswordNeverExpires -ErrorAction Stop | Out-Null }
+          catch { echo "New-LocalUser: $($_.Exception.Message)" }
+          Add-LocalGroupMember -Group Users -Member orxprobe -ErrorAction SilentlyContinue
+          echo "the other user: $((Get-LocalUser orxprobe -ErrorAction SilentlyContinue | Select-Object Name, Enabled) -join ' ')"
           Start-Service seclogon -ErrorAction SilentlyContinue
-          $cred = New-Object PSCredential('orxprobe', (ConvertTo-SecureString $pw -AsPlainText -Force))
+          echo "seclogon: $((Get-Service seclogon).Status)"
+          $cred = New-Object PSCredential("$env:COMPUTERNAME\orxprobe", $sec)
           function connectAs($who, $path) {
             $o = "$pub\out-$([guid]::NewGuid().ToString('N')).txt"
             try {
@@ -145,6 +150,8 @@ jobs:
           ServerRoot "$root"
           ServerName localhost
           Listen 127.0.0.1:8094
+          LoadModule authn_core_module modules/mod_authn_core.so
+          LoadModule authz_core_module modules/mod_authz_core.so
           LoadModule orxprobe_module "$mod"
           ErrorLog logs/probe-error.log
           LogLevel notice
@@ -152,6 +159,7 @@ jobs:
           DocumentRoot "$root/htdocs"
           <Location /probe>
               SetHandler orxprobe
+              Require all granted
           </Location>
           "@ | Out-File -Encoding ascii "$ap\conf\probe.conf"
           Remove-Item "$ap\logs\probe-error.log" -ErrorAction SilentlyContinue
