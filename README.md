@@ -16,8 +16,9 @@ provider mechanisms, and run in every other phase of the request
 preloaded once per host process. Programs written for mod_rexx run
 unchanged, in every phase, with mod_rexx's own configuration, through an
 optional layer ([modrexx/README.md](modrexx/README.md)). mod_orx needs
-ooRexx 5.3.0, and stays in beta until 5.3.0 is released; Windows is still
-to come. Not for production yet.
+ooRexx 5.3.0, and stays in beta until 5.3.0 is released. It runs on Linux,
+macOS and Windows (10 1803 or Server 2019 at least; the mod_rexx layer is
+Unix only for now). Not for production yet.
 
 ## Design in one page
 
@@ -137,6 +138,45 @@ Only for programs written for mod_rexx, the optional layer
 make modrexx
 sudo make install-modrexx    # PLUGINDIR=... too, if needed
 ```
+
+### On Windows
+
+Windows 10 version 1803, or Windows Server 2019, at least: the module and
+the host talk over an `AF_UNIX` socket, which older versions do not have
+(Windows Server 2016, among them, is out). mod_orx is built with Visual
+C++ against an Apache for Windows that ships its headers and import
+libraries ([Apache Lounge](https://www.apachelounge.com/)'s, say), and
+against the API in ooRexx's installer (its `api` folder):
+
+```bat
+build.cmd C:\path\to\ooRexx C:\Apache24
+```
+
+`build.cmd` finds Visual C++ through `vswhere` and leaves `mod_orx.so` and
+`oorexx-host.exe` in `build\`. Copy `mod_orx.so` to Apache's `modules\`
+and `oorexx-host.exe` to Apache's `bin\`, where the module looks for it by
+default (a relative `OoRexxHost` is relative to `ServerRoot`). The host
+needs `rexx.dll` and `rexxapi.dll`: on the `PATH` Apache runs with or,
+simplest, beside `oorexx-host.exe`. Apache may run as a service.
+
+What differs from Unix, none of it visible to programs:
+
+- Only Apache's parent process starts the host (mpm_winnt's child process
+  reads the configuration too). The host is in a job that ends with
+  Apache; a thread of the module restarts it if it dies, with the same
+  waits as on Unix.
+- The socket's ACL lets in only the account Apache runs as, SYSTEM and the
+  Administrators (by default, any authenticated user could connect).
+- The host's children take connections one at a time, under a mutex:
+  Windows does not hand a connection reliably to one of several processes
+  waiting on one `AF_UNIX` socket (measured).
+- A program's output is a `.Stream` on `STDOUT`, the write end of a pipe
+  that lasts as long as the host process: `.Stream` cannot open a pipe by
+  name there, and there is no `/dev/fd`. So the output of a command a
+  program runs (`Address SYSTEM`) goes to the client, as it does under
+  mod_cgi; on Unix it is discarded.
+- `OORX_TRACE=1` in Apache's environment makes the host's processes log
+  every step of each connection to the error log.
 
 ## Configuring
 
@@ -443,12 +483,23 @@ itself, and `make CXXFLAGS='-O2 -Wall -DORX_PORTABLE' APXS='apxs
 
 Continuous integration (`.github/workflows/ci.yml`) runs every test on
 Ubuntu under both MPMs, and builds mod_orx and runs `tests/standalone.sh`
-on macOS. Each test reports through annotations (`tests/ci-run.sh`).
+on macOS; `.github/workflows/windows.yml` runs `tests/windows.ps1` on
+Windows. Each test reports through annotations (`tests/ci-run.sh`).
 `tests/apache.sh` checks `Address APACHE` in the providers and the logging
 hook; `tests/native-phases.sh`, the `OoRexx<Phase>Hook` hooks: the order of
 the phases, every kind of return value, what each phase may change, the
 module's checks, `Authen`, subrequests and internal redirects, the
 directives and `LOG`.
+
+On Windows, `tests/windows.ps1 -Apache C:\Apache24 -OoRexx C:\ooRexx`
+deploys what `build.cmd` built into an Apache for Windows and checks, with
+Rexx CGI programs: the pool, the socket's ACL, exact output bytes, a 300 KB
+response, the body, the environment and the directory, flushes, errors and
+timeouts, several requests at once, a fixup hook with `Address APACHE`, a
+preloaded package, the death of a child and of the master, the job, and
+Apache as a service: a restart with a request in flight, and a stop. It
+also measures requests per second against the same program under mod_cgi.
+`.github/workflows/windows.yml` runs it on Windows Server 2022.
 
 The suite and these tests run without the mod_rexx layer. Its own
 tests, `tests/modrexx.sh` and `tests/modrexx-phases.sh`, load it for their

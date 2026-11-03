@@ -49,6 +49,10 @@
  *     what they hold and what is queued, and the master exits; after
  *     --grace seconds whatever is left is killed.
  *
+ *   - On Windows the same model, with CreateProcess, events and a file
+ *     mapping in place of fork, signals and a shared page, and an accept
+ *     mutex (see "The pool on Windows" below).
+ *
  * Usage:
  *   oorexx-host (--socket PATH | --listen-fd N) [--processes MIN]
  *               [--max-processes MAX] [--max-requests N] [--grace SECONDS]

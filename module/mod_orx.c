@@ -39,6 +39,8 @@
  *     Apache's User), starts oorexx-host on it in post_config, restarts it
  *     if it dies, and drains it on every restart and stop of Apache, so that
  *     requests in flight finish while the new generation already serves.
+ *     On Windows (mpm_winnt), Apache's parent process does the same; see
+ *     the life cycle below.
  *
  *   LoadModule orx_module modules/mod_orx.so
  *   OoRexxHost /usr/local/bin/oorexx-host     # or "none": started by hand
