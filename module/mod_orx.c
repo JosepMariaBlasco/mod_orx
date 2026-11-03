@@ -56,6 +56,19 @@
  *   OoRexxTransHook /path/trans.rex [arguments...]   # and the other phases
  */
 
+#ifdef _WIN32
+/* Windows (10 1803 or Server 2019 at least: AF_UNIX), mpm_winnt. Winsock,  */
+/* and ws2tcpip.h, before APR.                                              */
+#define WIN32_LEAN_AND_MEAN
+#define _CRT_SECURE_NO_WARNINGS
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <afunix.h>
+#include <windows.h>
+#include <aclapi.h>
+#include <sddl.h>
+#endif
+
 #include "httpd.h"
 #include "http_config.h"
 #include "http_core.h"
@@ -63,13 +76,16 @@
 #include "http_protocol.h"
 #include "http_request.h"
 #include "util_script.h"
+#ifndef _WIN32
 #include "unixd.h"
 #include "mod_unixd.h"
+#endif
 #include "apr_strings.h"
 #include "apr_thread_proc.h"
 #include "ap_provider.h"
 #include "mod_auth.h"
 
+#ifndef _WIN32
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -78,6 +94,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
+#endif
 /* Linux signals a process when its parent dies (PR_SET_PDEATHSIG); the   */
 /* host's keeper watches for that itself elsewhere, or when built with      */
 /* -DORX_PORTABLE (to test that on Linux).                                  */
@@ -389,6 +406,7 @@ static const command_rec oorx_cmds[] = {
 /* cleanup reaps it there and then, and the master drains as an orphan.     */
 /* ------------------------------------------------------------------------ */
 
+#ifndef _WIN32
 typedef struct {
     apr_proc_t  proc;          /* the host's keeper                          */
     int         running;       /* proc is alive and registered               */
@@ -406,10 +424,42 @@ typedef struct {
     apr_time_t  started;       /* when the current host was exec'd           */
     int         delay;         /* seconds the next start waits (0: none)     */
 } oorx_gen;
+#else
+/* On Windows (mpm_winnt) only Apache's parent starts the host: the child   */
+/* process reads the configuration too, and is told by AP_PARENT_PID. There */
+/* is no keeper: nothing in Apache reaps the host, so the generation has a  */
+/* thread of its own that waits for the host to die and starts it again;   */
+/* and the host drains when the generation sets its stop event. Every host  */
+/* is in a job that Apache's parent holds open for life: when it dies, the  */
+/* job closes and kills them all.                                           */
+typedef struct {
+    HANDLE      proc;          /* the host's master                          */
+    DWORD       pid;
+    int         running;       /* proc is alive                              */
+    int         retired;       /* the generation is over: do not restart     */
+    SOCKET      lfd;           /* the listening socket (INVALID_SOCKET once  */
+                               /* closed)                                    */
+    const char *path;          /* its path                                   */
+    DWORD       vol;           /* what the path named when it was bound:     */
+    DWORD       idx_hi, idx_lo; /* only that is deleted when the generation  */
+    int         have_id;       /* ends                                       */
+    HANDLE      stop;          /* set: the host drains                       */
+    HANDLE      retire;        /* set: the watcher thread ends               */
+    HANDLE      watcher;
+    CRITICAL_SECTION lock;     /* start_host, the watcher against the end    */
+    const char *host;
+    const char *cmdline;       /* the host's command line                    */
+    server_rec *s;
+    DWORD       parent;        /* Apache's parent process                    */
+    apr_time_t  started;
+    int         delay;
+} oorx_gen;
+#endif
 
 static const char *g_socket_path;   /* what the handler connects to         */
 static oorx_gen   *g_gen;           /* the current generation (parent only) */
 
+#ifndef _WIN32
 static void host_maint(int reason, void *data, apr_wait_t status);
 
 static int start_host(oorx_gen *g)
@@ -580,6 +630,307 @@ static int bind_socket(server_rec *s, const char *path)
     return fd;
 }
 
+#else /* _WIN32 */
+/* The handles the host must inherit are made inheritable only for as long  */
+/* as it takes to start it: Apache's parent starts its own child with        */
+/* bInheritHandles too, and that one must get none of them.                  */
+static void inheritable(HANDLE h, int yes)
+{
+    SetHandleInformation(h, HANDLE_FLAG_INHERIT, yes ? HANDLE_FLAG_INHERIT : 0);
+}
+
+/* Every host goes in this job, created once per Apache and kept, across   */
+/* restarts and module reloads, in the process pool: when Apache's parent  */
+/* exits or dies, the last handle on the job closes, and the job kills the */
+/* hosts it holds.                                                          */
+static HANDLE host_job(server_rec *s)
+{
+    void *data = NULL;
+    HANDLE job;
+    apr_pool_userdata_get(&data, "mod_orx-job", s->process->pool);
+    if (data) return (HANDLE)data;
+    job = CreateJobObjectA(NULL, NULL);
+    if (job) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION li;
+        memset(&li, 0, sizeof li);
+        li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(job, JobObjectExtendedLimitInformation, &li, sizeof li);
+        apr_pool_userdata_set(job, "mod_orx-job", apr_pool_cleanup_null, s->process->pool);
+    }
+    return job;
+}
+
+/* Called with g->lock held.                                                 */
+static int start_host(oorx_gen *g)
+{
+    HANDLE nul, err = NULL, e0 = GetStdHandle(STD_ERROR_HANDLE), inherit[4];
+    SECURITY_ATTRIBUTES sa = { sizeof sa, NULL, TRUE };
+    STARTUPINFOEXA si;
+    PROCESS_INFORMATION pi;
+    LPPROC_THREAD_ATTRIBUTE_LIST al;
+    SIZE_T size = 0;
+    char *line;
+    int n = 0, ok = 0;
+    HANDLE job = host_job(g->s);
+
+    nul = CreateFileA("NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                      &sa, OPEN_EXISTING, 0, NULL);
+    /* Its standard error is Apache's (the error log).                      */
+    if (e0 && e0 != INVALID_HANDLE_VALUE)
+        DuplicateHandle(GetCurrentProcess(), e0, GetCurrentProcess(), &err, 0, TRUE,
+                        DUPLICATE_SAME_ACCESS);
+    inherit[n++] = (HANDLE)g->lfd;
+    inherit[n++] = g->stop;
+    if (nul != INVALID_HANDLE_VALUE) inherit[n++] = nul;
+    if (err) inherit[n++] = err;
+    InitializeProcThreadAttributeList(NULL, 1, 0, &size);
+    al = malloc(size);
+    if (al && InitializeProcThreadAttributeList(al, 1, 0, &size)) {
+        if (UpdateProcThreadAttribute(al, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit,
+                                      n * sizeof(HANDLE), NULL, NULL)) {
+            memset(&si, 0, sizeof si);
+            si.StartupInfo.cb = sizeof si;
+            si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+            si.StartupInfo.hStdInput = si.StartupInfo.hStdOutput =
+                nul != INVALID_HANDLE_VALUE ? nul : NULL;
+            si.StartupInfo.hStdError = err;
+            si.lpAttributeList = al;
+            line = strdup(g->cmdline);
+            inheritable((HANDLE)g->lfd, 1);
+            inheritable(g->stop, 1);
+            /* Suspended until it is in the job: it must not start a child   */
+            /* outside it.                                                   */
+            ok = line && CreateProcessA(g->host, line, NULL, NULL, TRUE,
+                                        EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW |
+                                        CREATE_SUSPENDED, NULL, NULL, &si.StartupInfo, &pi);
+            inheritable((HANDLE)g->lfd, 0);
+            inheritable(g->stop, 0);
+            free(line);
+        }
+        DeleteProcThreadAttributeList(al);
+    }
+    free(al);
+    if (nul != INVALID_HANDLE_VALUE) CloseHandle(nul);
+    if (err) CloseHandle(err);
+    if (!ok) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, APR_FROM_OS_ERROR(GetLastError()), g->s,
+                     "mod_orx: cannot start oorexx-host (%s)", g->host);
+        return -1;
+    }
+    if (!job || !AssignProcessToJobObject(job, pi.hProcess))
+        ap_log_error(APLOG_MARK, APLOG_WARNING, APR_FROM_OS_ERROR(GetLastError()), g->s,
+                     "mod_orx: oorexx-host is not in a job: it may outlive Apache");
+    ResumeThread(pi.hThread);
+    CloseHandle(pi.hThread);
+    g->proc = pi.hProcess;
+    g->pid = pi.dwProcessId;
+    g->running = 1;
+    g->started = apr_time_now();
+    ap_log_error(APLOG_MARK, APLOG_INFO, 0, g->s,
+                 "mod_orx: oorexx-host started (pid %lu) on %s", g->pid, g->path);
+    return 0;
+}
+
+/* The generation's watcher: Apache on Windows does not tell a module that  */
+/* a process it started has died, so this thread waits for it, and starts   */
+/* the host again as host_maint does on Unix (same delays, same messages).  */
+static DWORD WINAPI host_watch(LPVOID data)
+{
+    oorx_gen *g = data;
+    for (;;) {
+        HANDLE hs[2];
+        DWORD w, code = 0;
+        int delay;
+        hs[0] = g->retire; hs[1] = g->proc;
+        w = WaitForMultipleObjects(g->running ? 2 : 1, hs, FALSE, INFINITE);
+        if (w != WAIT_OBJECT_0 + 1) return 0;            /* retired */
+        EnterCriticalSection(&g->lock);
+        GetExitCodeProcess(g->proc, &code);
+        CloseHandle(g->proc);
+        g->proc = NULL;
+        g->running = 0;
+        if (g->retired) { LeaveCriticalSection(&g->lock); return 0; }
+        if (code == HOST_EXIT_CONFIG) {
+            ap_log_error(APLOG_MARK, APLOG_CRIT, 0, g->s,
+                         "mod_orx: oorexx-host (%s) could not start (status %lu); "
+                         "not restarting it", g->host, code);
+            LeaveCriticalSection(&g->lock);
+            continue;                                    /* until retired */
+        }
+        if (apr_time_now() - g->started >= apr_time_from_sec(HOST_STABLE)) g->delay = 0;
+        else g->delay = g->delay ? (g->delay * 2 > HOST_MAX_DELAY ? HOST_MAX_DELAY
+                                                                  : g->delay * 2) : 1;
+        delay = g->delay;
+        if (delay)
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, g->s,
+                         "mod_orx: oorexx-host (pid %lu) ended (status %lu); restarting it "
+                         "in %d s", g->pid, code, delay);
+        else
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, g->s,
+                         "mod_orx: oorexx-host (pid %lu) ended (status %lu); restarting it",
+                         g->pid, code);
+        LeaveCriticalSection(&g->lock);
+        /* Connections queue on the socket meanwhile.                       */
+        if (delay && WaitForSingleObject(g->retire, (DWORD)delay * 1000) == WAIT_OBJECT_0)
+            return 0;
+        EnterCriticalSection(&g->lock);
+        if (!g->retired) start_host(g);
+        LeaveCriticalSection(&g->lock);
+    }
+}
+
+/* What a path names, to delete it only if it is still this generation's   */
+/* socket (as on Unix: another Apache may have bound one there since).      */
+static int path_id(const char *path, DWORD *vol, DWORD *hi, DWORD *lo)
+{
+    BY_HANDLE_FILE_INFORMATION fi;
+    int ok;
+    HANDLE h = CreateFileA(path, FILE_READ_ATTRIBUTES,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                           OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+                           NULL);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    ok = GetFileInformationByHandle(h, &fi);
+    CloseHandle(h);
+    if (!ok) return 0;
+    *vol = fi.dwVolumeSerialNumber; *hi = fi.nFileIndexHigh; *lo = fi.nFileIndexLow;
+    return 1;
+}
+
+static apr_status_t end_generation(void *data)
+{
+    oorx_gen *g = data;
+    if (GetCurrentProcessId() != g->parent) return APR_SUCCESS;
+    EnterCriticalSection(&g->lock);
+    g->retired = 1;
+    LeaveCriticalSection(&g->lock);
+    SetEvent(g->retire);
+    WaitForSingleObject(g->watcher, INFINITE);
+    CloseHandle(g->watcher);
+    if (g->lfd != INVALID_SOCKET) {
+        /* First: nothing new reaches it.                                  */
+        DWORD vol, hi, lo;
+        if (g->have_id && path_id(g->path, &vol, &hi, &lo) && vol == g->vol &&
+            hi == g->idx_hi && lo == g->idx_lo)
+            DeleteFileA(g->path);
+        closesocket(g->lfd);
+        g->lfd = INVALID_SOCKET;
+    }
+    /* Then the host drains, on its own: nothing of it needs this module    */
+    /* any more (Apache unloads it on a restart).                           */
+    if (g->running) {
+        SetEvent(g->stop);
+        CloseHandle(g->proc);
+        g->proc = NULL;
+        g->running = 0;
+    }
+    CloseHandle(g->stop);
+    CloseHandle(g->retire);
+    DeleteCriticalSection(&g->lock);
+    if (g_gen == g) g_gen = NULL;
+    return APR_SUCCESS;
+}
+
+/* Only the account Apache runs as, SYSTEM and the Administrators may       */
+/* connect (by default, the socket gets its directory's ACL, which lets     */
+/* every authenticated user in: measured). Set before listen().             */
+static int secure_socket(server_rec *s, const char *path)
+{
+    HANDLE tok = NULL, h;
+    char tu[256], *sid = NULL, *sddl;
+    DWORD len = 0;
+    PSECURITY_DESCRIPTOR sd = NULL;
+    PACL dacl = NULL;
+    BOOL present = FALSE, defaulted = FALSE;
+    int ok = 0;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok) &&
+        GetTokenInformation(tok, TokenUser, tu, sizeof tu, &len) &&
+        ConvertSidToStringSidA(((TOKEN_USER *)tu)->User.Sid, &sid)) {
+        sddl = apr_psprintf(s->process->pool, "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;%s)", sid);
+        if (ConvertStringSecurityDescriptorToSecurityDescriptorA(sddl, SDDL_REVISION_1, &sd, NULL)
+            && GetSecurityDescriptorDacl(sd, &present, &dacl, &defaulted)) {
+            h = CreateFileA(path, READ_CONTROL | WRITE_DAC,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                            OPEN_EXISTING,
+                            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
+            if (h != INVALID_HANDLE_VALUE) {
+                ok = SetSecurityInfo(h, SE_FILE_OBJECT,
+                                     DACL_SECURITY_INFORMATION |
+                                     PROTECTED_DACL_SECURITY_INFORMATION,
+                                     NULL, NULL, dacl, NULL) == ERROR_SUCCESS;
+                CloseHandle(h);
+            }
+        }
+    }
+    if (!ok)
+        ap_log_error(APLOG_MARK, APLOG_CRIT, APR_FROM_OS_ERROR(GetLastError()), s,
+                     "mod_orx: cannot restrict who may connect to %s", path);
+    if (sd) LocalFree(sd);
+    if (sid) LocalFree(sid);
+    if (tok) CloseHandle(tok);
+    return ok;
+}
+
+static SOCKET bind_socket(server_rec *s, const char *path)
+{
+    struct sockaddr_un sa;
+    SOCKET fd;
+    if (strlen(path) >= sizeof sa.sun_path) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, 0, s, "mod_orx: socket path too long: %s", path);
+        return INVALID_SOCKET;
+    }
+    memset(&sa, 0, sizeof sa);
+    sa.sun_family = AF_UNIX;
+    strcpy(sa.sun_path, path);
+    fd = WSASocketW(AF_UNIX, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+    if (fd == INVALID_SOCKET) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, apr_get_netos_error(), s,
+                     "mod_orx: cannot create a socket");
+        return INVALID_SOCKET;
+    }
+    DeleteFileA(path);
+    if (bind(fd, (struct sockaddr *)&sa, sizeof sa) != 0) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, apr_get_netos_error(), s,
+                     "mod_orx: cannot bind %s", path);
+        closesocket(fd);
+        return INVALID_SOCKET;
+    }
+    if (!secure_socket(s, path) || listen(fd, SOMAXCONN) != 0) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, apr_get_netos_error(), s,
+                     "mod_orx: cannot set up %s", path);
+        closesocket(fd);
+        DeleteFileA(path);
+        return INVALID_SOCKET;
+    }
+    return fd;
+}
+
+/* The host's command line: the program, quoted as the C runtime parses it, */
+/* then its arguments.                                                       */
+static void append_arg(apr_pool_t *p, const char **cmd, const char *a)
+{
+    const char *c;
+    char *q, *o;
+    size_t bs = 0;
+    if (*a && !strpbrk(a, " \t\"")) {
+        *cmd = *cmd ? apr_pstrcat(p, *cmd, " ", a, NULL) : a;
+        return;
+    }
+    q = o = apr_palloc(p, strlen(a) * 2 + 3);
+    *o++ = '"';
+    for (c = a; *c; c++) {
+        if (*c == '\\') { bs++; continue; }
+        if (*c == '"') { memset(o, '\\', bs * 2 + 1); o += bs * 2 + 1; }
+        else { memset(o, '\\', bs); o += bs; }
+        bs = 0;
+        *o++ = *c;
+    }
+    memset(o, '\\', bs * 2); o += bs * 2;
+    *o++ = '"'; *o = '\0';
+    *cmd = *cmd ? apr_pstrcat(p, *cmd, " ", q, NULL) : q;
+}
+#endif /* _WIN32 */
+
 static int oorx_pre_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptemp)
 {
     (void)plog; (void)ptemp;
@@ -595,6 +946,7 @@ static int oorx_pre_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptem
     return OK;
 }
 
+#ifndef _WIN32
 static int oorx_post_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptemp,
                             server_rec *s)
 {
@@ -673,13 +1025,110 @@ static void oorx_child_init(apr_pool_t *p, server_rec *s)
     if (g_gen && g_gen->lfd >= 0) close(g_gen->lfd);
 }
 
+#else /* _WIN32 */
+static int oorx_post_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptemp,
+                            server_rec *s)
+{
+    apr_pool_t *pp = pconf;
+    oorx_gen *g;
+    DWORD attr;
+    WSADATA wsa;
+    (void)plog; (void)ptemp;
+
+    g_socket_path = g_socket_cfg;
+    if (g_host_none) return OK;                /* the host is not ours    */
+    if (ap_state_query(AP_SQ_MAIN_STATE) == AP_SQ_MS_CREATE_PRE_CONFIG ||
+        ap_state_query(AP_SQ_RUN_MODE) != AP_SQ_RM_NORMAL)
+        return OK;
+    if (!g_socket_path) g_socket_path = ap_runtime_dir_relative(pconf, DEFAULT_SOCKET);
+    /* mpm_winnt's child process reads the configuration too: it only needs */
+    /* the socket's path. The host is the parent's.                         */
+    if (getenv("AP_PARENT_PID")) return OK;
+
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+    g = apr_pcalloc(pp, sizeof *g);
+    g->s = s;
+    g->parent = GetCurrentProcessId();
+    g->lfd = INVALID_SOCKET;
+    g->path = apr_pstrdup(pp, g_socket_path);
+    /* A relative OoRexxHost (the default is one: bin/oorexx-host.exe) is  */
+    /* relative to ServerRoot.                                              */
+    g->host = ap_server_root_relative(pp, g_host ? g_host : OORX_DEFAULT_HOST);
+    attr = g->host ? GetFileAttributesA(g->host) : INVALID_FILE_ATTRIBUTES;
+    if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, APR_FROM_OS_ERROR(GetLastError()), s,
+                     "mod_orx: OoRexxHost %s is not an executable file",
+                     g->host ? g->host : "?");
+        return HTTP_INTERNAL_SERVER_ERROR;
+    }
+    if ((g->lfd = bind_socket(s, g->path)) == INVALID_SOCKET) return HTTP_INTERNAL_SERVER_ERROR;
+    g->have_id = path_id(g->path, &g->vol, &g->idx_hi, &g->idx_lo);
+    g->stop = CreateEventA(NULL, TRUE, FALSE, NULL);
+    g->retire = CreateEventA(NULL, TRUE, FALSE, NULL);
+    if (!g->stop || !g->retire) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, APR_FROM_OS_ERROR(GetLastError()), s,
+                     "mod_orx: cannot create the host's events");
+        return HTTP_INTERNAL_SERVER_ERROR;
+    }
+    InitializeCriticalSection(&g->lock);
+
+    {
+        int i, n = g_preload ? g_preload->nelts : 0;
+        int np = g_plugins ? g_plugins->nelts : 0;
+        const char *cmd = NULL;
+        append_arg(pp, &cmd, g->host);
+        append_arg(pp, &cmd, "--listen-fd");
+        append_arg(pp, &cmd, apr_psprintf(pp, "%" APR_UINT64_T_FMT, (apr_uint64_t)g->lfd));
+        append_arg(pp, &cmd, "--stop-event");
+        append_arg(pp, &cmd, apr_psprintf(pp, "%" APR_UINT64_T_FMT,
+                                          (apr_uint64_t)(apr_uintptr_t)g->stop));
+        append_arg(pp, &cmd, "--processes");     append_arg(pp, &cmd, apr_itoa(pp, g_min_procs));
+        append_arg(pp, &cmd, "--max-processes"); append_arg(pp, &cmd, apr_itoa(pp, g_max_procs));
+        append_arg(pp, &cmd, "--max-requests");  append_arg(pp, &cmd, apr_itoa(pp, g_max_requests));
+        append_arg(pp, &cmd, "--grace");
+        append_arg(pp, &cmd, apr_itoa(pp, g_max_timeout + 10));
+        for (i = 0; i < n; i++) {
+            append_arg(pp, &cmd, "--preload");
+            append_arg(pp, &cmd, APR_ARRAY_IDX(g_preload, i, const char *));
+        }
+        for (i = 0; i < np; i++) {
+            append_arg(pp, &cmd, "--plugin");
+            append_arg(pp, &cmd, APR_ARRAY_IDX(g_plugins, i, const char *));
+        }
+        g->cmdline = cmd;
+    }
+
+    apr_pool_cleanup_register(pconf, g, end_generation, apr_pool_cleanup_null);
+    g_gen = g;
+    EnterCriticalSection(&g->lock);
+    start_host(g);
+    LeaveCriticalSection(&g->lock);
+    if (!g->running) return HTTP_INTERNAL_SERVER_ERROR;
+    g->watcher = CreateThread(NULL, 0, host_watch, g, 0, NULL);
+    if (!g->watcher) {
+        ap_log_error(APLOG_MARK, APLOG_ERR, APR_FROM_OS_ERROR(GetLastError()), s,
+                     "mod_orx: no thread to watch oorexx-host: it will not be restarted");
+        g->watcher = CreateEventA(NULL, TRUE, TRUE, NULL);   /* a done "thread" */
+    }
+    return OK;
+}
+
+static void oorx_child_init(apr_pool_t *p, server_rec *s)
+{
+    WSADATA wsa;
+    (void)p; (void)s;
+    /* A worker only connects; nothing of the host is in this process.     */
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+}
+#endif /* _WIN32 */
+
 /* ------------------------------------------------------------------------ */
 /* The connection to the host, and the frame pump                           */
 /* ------------------------------------------------------------------------ */
 
 struct orx_conn {
     request_rec *r;
-    int          fd;
+    oorx_sock_t  fd;
     char        *buf;          /* DATA received and not yet consumed */
     apr_size_t   len, pos, cap;
     int          flush;        /* the last DATA frame asked for a flush */
@@ -699,7 +1148,8 @@ typedef struct orx_conn oorx_conn;
 
 static void apply_update(oorx_conn *c, const char *op, const char *key, const char *val);
 
-static int connect_host(request_rec *r, const char *path, int timeout)
+#ifndef _WIN32
+static oorx_sock_t connect_host(request_rec *r, const char *path, int timeout)
 {
     struct sockaddr_un sa;
     struct timeval tv;
@@ -738,18 +1188,72 @@ static int connect_host(request_rec *r, const char *path, int timeout)
     return fd;
 }
 
+#else
+/* As on Unix: while Apache rereads its configuration the socket is gone or */
+/* not there yet, and a full queue refuses too; Windows says either with    */
+/* WSAECONNREFUSED, or with the file-system error for a missing path.        */
+static oorx_sock_t connect_host(request_rec *r, const char *path, int timeout)
+{
+    struct sockaddr_un sa;
+    SOCKET fd;
+    DWORD ms;
+    apr_interval_time_t delay = CONNECT_FIRST_DELAY, waited = 0;
+
+    if (strlen(path) >= sizeof sa.sun_path) return INVALID_SOCKET;
+    memset(&sa, 0, sizeof sa);
+    sa.sun_family = AF_UNIX;
+    strcpy(sa.sun_path, path);
+    for (;;) {
+        int e;
+        fd = WSASocketW(AF_UNIX, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+        if (fd == INVALID_SOCKET) return INVALID_SOCKET;
+        if (connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0) break;
+        e = WSAGetLastError();
+        if ((e != WSAECONNREFUSED && e != WSAEWOULDBLOCK && e != ERROR_FILE_NOT_FOUND &&
+             e != ERROR_PATH_NOT_FOUND) || waited >= CONNECT_BUDGET) {
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, APR_FROM_OS_ERROR(e), r,
+                          "mod_orx: cannot connect to oorexx-host at %s", path);
+            closesocket(fd);
+            return INVALID_SOCKET;
+        }
+        closesocket(fd);
+        apr_sleep(delay);
+        waited += delay;
+        if (delay < CONNECT_MAX_DELAY) delay *= 2;
+    }
+    ms = (DWORD)(timeout + 10) * 1000;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&ms, sizeof ms);
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&ms, sizeof ms);
+    return fd;
+}
+#endif
+
 /* Wait for ACCEPT: a connection is only queued on the socket until a host */
 /* process takes it, and every process may be busy. Returns 0; or -1 if no  */
 /* process took it in time, or -2 if the host does not speak our protocol   */
 /* or the connection broke (each logged).                                   */
-static int wait_accept(request_rec *r, int fd, int seconds, const char *directive)
+static int wait_accept(request_rec *r, oorx_sock_t fd, int seconds, const char *directive)
 {
+#ifdef _WIN32
+    /* WSAPoll on AF_UNIX: measured as poll on Unix, but a closed peer is   */
+    /* POLLHUP alone, without POLLIN. Only n matters here, so that is fine. */
+    WSAPOLLFD pf;
+#else
     struct pollfd pf;
+#endif
     apr_time_t deadline = apr_time_now() + apr_time_from_sec(seconds);
     unsigned char v;
     int type, flags, n;
     uint32_t len;
 
+#ifdef _WIN32
+    pf.fd = fd; pf.events = POLLRDNORM;
+    {
+        apr_interval_time_t left = deadline - apr_time_now();
+        pf.revents = 0;
+        n = left > 0 ? WSAPoll(&pf, 1, (int)apr_time_as_msec(left) + 1) : 0;
+    }
+#else
     pf.fd = fd; pf.events = POLLIN;
     for (;;) {
         apr_interval_time_t left = deadline - apr_time_now();
@@ -758,6 +1262,7 @@ static int wait_accept(request_rec *r, int fd, int seconds, const char *directiv
         if (n < 0 && errno == EINTR) continue;
         break;
     }
+#endif
     if (n == 0) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
                       "mod_orx: no oorexx-host process free within %d s "
@@ -898,7 +1403,11 @@ static void discard_output(oorx_conn *c)
 
 static apr_status_t close_fd(void *data)
 {
+#ifdef _WIN32
+    closesocket((SOCKET)(apr_uintptr_t)data);
+#else
     close((int)(apr_uintptr_t)data);
+#endif
     return APR_SUCCESS;
 }
 
@@ -1127,7 +1636,7 @@ static int orx_phase_open(request_rec *r, const orx_phase *ph, orx_conn **cp)
     c->client_op = ph->client_op;
     c->ctx = ph->ctx;
     c->fd = connect_host(r, g_socket_path, timeout);
-    if (c->fd < 0) return HTTP_SERVICE_UNAVAILABLE;
+    if (c->fd == OORX_NO_SOCK) return HTTP_SERVICE_UNAVAILABLE;
     apr_pool_cleanup_register(r->pool, (void *)(apr_uintptr_t)c->fd, close_fd,
                               apr_pool_cleanup_null);
     switch (wait_accept(r, c->fd, queue,

@@ -55,16 +55,31 @@
  *               [--preload FILE]... [--plugin CLASS:PATH]...
  */
 
+#ifdef _WIN32
+/* Windows (10 1803 or Server 2019 at least: AF_UNIX). Winsock before       */
+/* anything that brings in windows.h, oorexxapi.h included.                 */
+#define WIN32_LEAN_AND_MEAN
+#define _CRT_SECURE_NO_WARNINGS
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <afunix.h>
+#include <windows.h>
+#include <io.h>
+#include <process.h>
+#endif
+
 #include <oorexxapi.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <ctype.h>
+#include <stdint.h>
+#include <time.h>
+#ifndef _WIN32
 #include <signal.h>
 #include <unistd.h>
-#include <pthread.h>
-#include <time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -74,6 +89,8 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <dlfcn.h>
+#include <strings.h>
+#endif
 /* Linux kills or warns a process when its parent dies (PR_SET_PDEATHSIG). */
 /* Elsewhere (macOS, the BSDs), the keeper and the master watch their       */
 /* parent themselves, and the children already end with the stop pipe (see  */
@@ -87,7 +104,14 @@
 #include <string>
 #include <vector>
 #include <map>
-#include <strings.h>
+#include <thread>
+#include <mutex>
+#include <chrono>
+#include <condition_variable>
+
+#ifdef _WIN32
+#define strcasecmp _stricmp
+#endif
 
 extern "C" {
 #include "../include/oorexx_protocol.h"
@@ -103,7 +127,7 @@ static const orx_host_plugin *g_plugin[MAX_CLASSES];
 /* globals are the honest representation.                                   */
 /* ------------------------------------------------------------------------ */
 
-static int         g_fd = -1;          /* the connection                    */
+static oorx_sock_t g_fd = OORX_NO_SOCK; /* the connection                   */
 static std::string g_in;               /* body bytes received, not consumed */
 static bool        g_in_eof = false;   /* the module said: no more body     */
 static volatile bool g_broken = false; /* the connection failed: stop I/O   */
@@ -111,14 +135,36 @@ static volatile bool g_broken = false; /* the connection failed: stop I/O   */
 /* Two threads write frames on the connection: the main thread (READ, LOG,
  * RESULT) and the output pump (DATA). Only the main thread ever reads. A
  * frame is written under this lock, so frames never interleave.            */
-static pthread_mutex_t g_send_lock = PTHREAD_MUTEX_INITIALIZER;
+static std::mutex g_send_lock;
 
 static void send_frame(int type, int flags, const void *p, uint32_t n)
 {
     if (g_broken) return;
-    pthread_mutex_lock(&g_send_lock);
+    std::lock_guard<std::mutex> hold(g_send_lock);
     if (oorx_send(g_fd, type, flags, p, n) < 0) g_broken = true;
-    pthread_mutex_unlock(&g_send_lock);
+}
+
+/* Leave the process at once: no atexit handlers, no flushing. On Windows,  */
+/* without detaching DLLs either: rexx.dll, with the anchor instance alive  */
+/* and the watchdog thread waiting, must not be asked to clean up.          */
+static void quit(int code)
+{
+#ifdef _WIN32
+    TerminateProcess(GetCurrentProcess(), (UINT)code);
+#endif
+    _exit(code);
+}
+
+/* A whole message to standard error, in one write: when every child fails  */
+/* alike, the lines must not mix.                                           */
+static void err_write(const std::string &m)
+{
+#ifdef _WIN32
+    DWORD n;
+    WriteFile(GetStdHandle(STD_ERROR_HANDLE), m.data(), (DWORD)m.size(), &n, NULL);
+#else
+    if (write(2, m.data(), m.size()) < 0) { /* nowhere else to say it */ }
+#endif
 }
 
 static void send_log(int level, const char *msg, size_t n)
@@ -126,6 +172,56 @@ static void send_log(int level, const char *msg, size_t n)
     std::string payload(1, (char)level);
     payload.append(msg, n);
     send_frame(OORX_LOG, 0, payload.data(), (uint32_t)payload.size());
+}
+
+/* The process environment, which a program reads (Value(..., 'ENVIRONMENT')). */
+/* On Windows, the Win32 one: rexx.dll has a C runtime of its own, and reads  */
+/* the environment through the Win32 API, not through any C runtime's copy.   */
+static void env_set(const std::string &k, const std::string &v)
+{
+#ifdef _WIN32
+    SetEnvironmentVariableA(k.c_str(), v.c_str());
+#else
+    setenv(k.c_str(), v.c_str(), 1);
+#endif
+}
+
+/* clearenv() is glibc's; elsewhere, unset every variable by name. On       */
+/* Windows the names that start with "=" (a drive's current directory) are  */
+/* not variables, and stay.                                                 */
+static void env_clear(void)
+{
+#if defined(_WIN32)
+    std::vector<std::string> names;
+    char *block = GetEnvironmentStringsA();
+    for (char *e = block; e && *e; e += strlen(e) + 1) {
+        const char *eq = strchr(e + 1, '=');
+        if (*e != '=') names.push_back(eq ? std::string(e, eq - e) : std::string(e));
+    }
+    if (block) FreeEnvironmentStringsA(block);
+    for (size_t i = 0; i < names.size(); i++) SetEnvironmentVariableA(names[i].c_str(), NULL);
+#elif defined(__GLIBC__) && !defined(ORX_PORTABLE)
+    clearenv();
+#else
+    extern char **environ;
+    std::vector<std::string> names;
+    for (char **e = environ; e && *e; e++) {
+        const char *eq = strchr(*e, '=');
+        names.push_back(eq ? std::string(*e, eq - *e) : std::string(*e));
+    }
+    for (size_t i = 0; i < names.size(); i++) unsetenv(names[i].c_str());
+#endif
+}
+
+/* Run in the program's directory, as mod_cgi does.                         */
+static void change_dir(const std::string &dir)
+{
+    if (dir.empty()) return;
+#ifdef _WIN32
+    SetCurrentDirectoryA(dir.c_str());
+#else
+    if (chdir(dir.c_str()) < 0) { /* not fatal */ }
+#endif
 }
 
 /* The output pump. The program's output is a genuine .Stream (RexxHTTP, for
@@ -143,9 +239,21 @@ static void send_log(int level, const char *msg, size_t n)
 /* where what the program returns can still change its status).            */
 #define QUIET_MS 10
 static bool g_quiet_flush = true;
-static void *output_pump(void *arg)
+
+/* The program's output channel for one phase: out_open gives the name the  */
+/* bootstrap opens as a .Stream and starts the pump; out_close, once the    */
+/* program has ended and its stream is closed, waits until the pump has     */
+/* forwarded everything.                                                    */
+struct out_channel {
+    std::thread pump;
+#ifndef _WIN32
+    int wfd;                           /* the write end, the program's      */
+#endif
+};
+
+#ifndef _WIN32
+static void output_pump(int rfd)
 {
-    int rfd = (int)(intptr_t)arg;
     char buf[OORX_CHUNK];
     for (;;) {
         ssize_t n = read(rfd, buf, sizeof buf);
@@ -159,8 +267,118 @@ static void *output_pump(void *arg)
         send_frame(OORX_DATA, more ? 0 : OORX_FLAG_FLUSH, buf, (uint32_t)n);
     }
     close(rfd);
-    return NULL;
 }
+
+/* A pipe per phase, opened as /dev/fd/N: its EOF is the end of the output. */
+static bool out_open(out_channel &o, std::string &name)
+{
+    int pfd[2];
+    if (pipe(pfd) < 0) return false;
+    o.wfd = pfd[1];
+    o.pump = std::thread(output_pump, pfd[0]);
+    char path[32];
+    snprintf(path, sizeof path, "/dev/fd/%d", pfd[1]);
+    name = path;
+    return true;
+}
+
+static void out_close(out_channel &o)
+{
+    close(o.wfd);
+    o.pump.join();                     /* all output forwarded */
+}
+#else
+/* On Windows the program writes to 'STDOUT': .Stream will not open a pipe  */
+/* by name, and rexx.dll carries its own C runtime, so the output must be   */
+/* the process's standard output handle from birth. The master makes it the */
+/* write end of a pipe that lasts as long as the child, and hands the child */
+/* the read end too, opened for overlapped I/O. One read is always pending  */
+/* on it, from one phase to the next.                                       */
+/*                                                                          */
+/* There is no EOF per phase. The end is safe to tell once the program has  */
+/* ended (g_phase_done): every write it made has returned, so what it wrote */
+/* is either in the pending read, which then completes, or in the pipe. So  */
+/* the pump reads on until the pipe is empty AND the pending read has not   */
+/* completed -- in that order, since a read may complete between the two   */
+/* checks, but nothing can enter the pipe any more.                         */
+static HANDLE     g_out_r = INVALID_HANDLE_VALUE;
+static HANDLE     g_phase_done;
+static OVERLAPPED g_ov;
+static char       g_obuf[OORX_CHUNK];
+static bool       g_read_pending = false;
+
+/* Start the next read. False if the pipe is broken (the child cannot go on). */
+static bool start_read(void)
+{
+    if (g_read_pending) return true;
+    ResetEvent(g_ov.hEvent);
+    if (!ReadFile(g_out_r, g_obuf, sizeof g_obuf, NULL, &g_ov) &&
+        GetLastError() != ERROR_IO_PENDING)
+        return false;
+    g_read_pending = true;             /* even if it completed at once: the */
+    return true;                       /* event is set, and is seen next    */
+}
+
+/* The pending read has completed: its bytes, or -1 if the pipe broke.      */
+static long finish_read(void)
+{
+    DWORD n = 0;
+    g_read_pending = false;
+    if (!GetOverlappedResult(g_out_r, &g_ov, &n, FALSE)) return -1;
+    return (long)n;
+}
+
+static void output_pump(void)
+{
+    std::string held;                  /* the last chunk, not sent yet: it  */
+    bool have = false;                 /* goes with FLUSH if a quiet gap    */
+    bool ending = false;               /* follows, without it otherwise     */
+    for (;;) {
+        if (!start_read()) quit(1);
+        DWORD w;
+        if (ending) {
+            /* The program has ended: done when the pipe is empty and the   */
+            /* pending read has not completed (checked in that order).      */
+            DWORD avail = 0;
+            if (!PeekNamedPipe(g_out_r, NULL, 0, NULL, &avail, NULL)) quit(1);
+            if (avail == 0 && WaitForSingleObject(g_ov.hEvent, 0) == WAIT_TIMEOUT) break;
+            w = WaitForSingleObject(g_ov.hEvent, INFINITE);
+        } else {
+            HANDLE hs[2] = { g_ov.hEvent, g_phase_done };
+            w = WaitForMultipleObjects(2, hs, FALSE,
+                                       have && g_quiet_flush ? QUIET_MS : INFINITE);
+        }
+        if (w == WAIT_OBJECT_0) {
+            long n = finish_read();
+            if (n < 0) quit(1);
+            if (n == 0) continue;
+            if (have) send_frame(OORX_DATA, 0, held.data(), (uint32_t)held.size());
+            held.assign(g_obuf, (size_t)n);
+            have = true;
+        } else if (w == WAIT_TIMEOUT) {
+            send_frame(OORX_DATA, OORX_FLAG_FLUSH, held.data(), (uint32_t)held.size());
+            have = false;
+        } else if (w == WAIT_OBJECT_0 + 1) {
+            ending = true;
+        } else quit(1);
+    }
+    if (have) send_frame(OORX_DATA, 0, held.data(), (uint32_t)held.size());
+}
+
+static bool out_open(out_channel &o, std::string &name)
+{
+    ResetEvent(g_phase_done);
+    o.pump = std::thread(output_pump);
+    name = "STDOUT";
+    return true;
+}
+
+static void out_close(out_channel &o)
+{
+    SetEvent(g_phase_done);
+    o.pump.join();                     /* all output forwarded */
+}
+#endif
 
 /* Ask the module for more body. Returns false at EOF or on failure.        */
 static bool fill_in(size_t want)
@@ -319,45 +537,42 @@ static const char bootstrap_src[] =
 /* Watchdog: Halt() the instance when the deadline passes.                  */
 /* ------------------------------------------------------------------------ */
 
-static pthread_mutex_t wd_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t  wd_cond = PTHREAD_COND_INITIALIZER;
-static RexxInstance   *wd_instance = NULL;
-static struct timespec wd_deadline;
-static bool            wd_armed = false;
-static bool            wd_fired = false;
+typedef std::chrono::steady_clock wd_clock;
+static std::mutex              wd_lock;
+static std::condition_variable wd_cond;
+static RexxInstance           *wd_instance = NULL;
+static wd_clock::time_point    wd_deadline;
+static bool                    wd_armed = false;
+static bool                    wd_fired = false;
 
-static void *watchdog(void *)
+static void watchdog(void)
 {
-    pthread_mutex_lock(&wd_lock);
+    std::unique_lock<std::mutex> hold(wd_lock);
     for (;;) {
-        if (!wd_armed) { pthread_cond_wait(&wd_cond, &wd_lock); continue; }
-        int rc = pthread_cond_timedwait(&wd_cond, &wd_lock, &wd_deadline);
-        if (rc == ETIMEDOUT && wd_armed) {
+        if (!wd_armed) { wd_cond.wait(hold); continue; }
+        wd_cond.wait_until(hold, wd_deadline);
+        if (wd_armed && wd_clock::now() >= wd_deadline) {
             wd_armed = false;
             wd_fired = true;
             wd_instance->Halt();       /* instance API: safe from here */
         }
     }
-    return NULL;
 }
 
 static void wd_arm(RexxInstance *inst, unsigned seconds)
 {
-    pthread_mutex_lock(&wd_lock);
-    clock_gettime(CLOCK_REALTIME, &wd_deadline);
-    wd_deadline.tv_sec += seconds;
+    std::lock_guard<std::mutex> hold(wd_lock);
+    wd_deadline = wd_clock::now() + std::chrono::seconds(seconds);
     wd_instance = inst; wd_armed = seconds > 0; wd_fired = false;
-    pthread_cond_signal(&wd_cond);
-    pthread_mutex_unlock(&wd_lock);
+    wd_cond.notify_one();
 }
 
 static bool wd_disarm(void)
 {
-    pthread_mutex_lock(&wd_lock);
+    std::lock_guard<std::mutex> hold(wd_lock);
     bool fired = wd_fired;
     wd_armed = false; wd_instance = NULL;
-    pthread_cond_signal(&wd_cond);
-    pthread_mutex_unlock(&wd_lock);
+    wd_cond.notify_one();
     return fired;
 }
 
@@ -426,7 +641,7 @@ static void snap_load(const std::string &k, const std::string &v)
     if (p + 2 > k.size() || k[p + 1] != ':') return;
     char kind = k[p];
     std::string name = k.substr(p + 2);
-    if (kind == 'E') { if (!q) setenv(name.c_str(), v.c_str(), 1); return; }
+    if (kind == 'E') { if (!q) env_set(name, v); return; }
     if (g_snap.req.size() <= q) g_snap.req.resize(q + 1);
     if (kind == 'r') { g_snap.req[q].r[name] = v; return; }
     int t = table_index(kind);
@@ -641,23 +856,8 @@ static bool parse_strings(const std::string &t, std::vector<std::string> &out)
     return true;
 }
 
-/* clearenv() is glibc's; elsewhere, unset every variable by name.         */
-static void clear_env(void)
-{
-#if defined(__GLIBC__) && !defined(ORX_PORTABLE)
-    clearenv();
-#else
-    extern char **environ;
-    std::vector<std::string> names;
-    for (char **e = environ; e && *e; e++) {
-        const char *eq = strchr(*e, '=');
-        names.push_back(eq ? std::string(*e, eq - *e) : std::string(*e));
-    }
-    for (size_t i = 0; i < names.size(); i++) unsetenv(names[i].c_str());
-#endif
-}
 
-static void serve(int fd)
+static void serve(oorx_sock_t fd)
 {
     g_fd = fd; g_in.clear(); g_in_eof = false; g_broken = false;
 
@@ -710,7 +910,7 @@ static void serve(int fd)
     if (type != OORX_VARS) return;
     std::string vars(len, '\0');
     if (len && oorx_read_all(fd, &vars[0], len) < 0) return;
-    clear_env();
+    env_clear();
     g_snap.req.clear(); g_snap.client.clear();
     bool snapshot = (flags & OORX_FLAG_SNAPSHOT) != 0;
     for (size_t p = 0; p + 4 <= vars.size(); ) {
@@ -721,7 +921,7 @@ static void serve(int fd)
         if (p + vl > vars.size()) break;
         std::string v = vars.substr(p, vl); p += vl;
         if (snapshot) snap_load(k, v);
-        else setenv(k.c_str(), v.c_str(), 1);
+        else env_set(k, v);
     }
 
     /* The instance's policy: the plugin's, or the core's (a CGI's or a    */
@@ -738,8 +938,13 @@ static void serve(int fd)
 
     /* Like mod_cgi: run in the program's directory, unless the policy      */
     /* says otherwise.                                                      */
-    std::string dir = pol.cwd ? pol.cwd : program.substr(0, program.rfind('/') + 1);
-    if (!dir.empty() && chdir(dir.c_str()) < 0) { /* not fatal */ }
+#ifdef _WIN32
+    size_t slash = program.find_last_of("/\\");
+#else
+    size_t slash = program.rfind('/');
+#endif
+    change_dir(pol.cwd ? std::string(pol.cwd)
+                       : program.substr(0, slash == std::string::npos ? 0 : slash + 1));
 
     /* A fresh instance for this phase.                                     */
     RexxLibraryPackage lib = { "OORXHOST", &host_package };
@@ -763,24 +968,21 @@ static void serve(int fd)
     uint32_t status = 0;
     std::string value;
     bool has_value = false;
-    int pfd[2];
-    pthread_t pump;
-    if (pipe(pfd) < 0) {
+    out_channel och;
+    std::string pipe_path;
+    if (!out_open(och, pipe_path)) {
         inst->Terminate();
         logf_conn("oorexx-host: cannot create the output pipe%s", "");
         send_result(500);
         if (plugin) plugin->end();
         return;
     }
-    pthread_create(&pump, NULL, output_pump, (void *)(intptr_t)pfd[0]);
-    char pipe_path[32];
-    snprintf(pipe_path, sizeof pipe_path, "/dev/fd/%d", pfd[1]);
 
     RexxRoutineObject boot = tc->NewRoutine("oorexx-host bootstrap",
                                             bootstrap_src, sizeof bootstrap_src - 1);
     RexxObjectPtr out = NULLOBJECT;
     if (boot != NULLOBJECT && !tc->CheckCondition()) {
-        RexxArrayObject bargs = tc->ArrayOfTwo(tc->String(pipe_path),
+        RexxArrayObject bargs = tc->ArrayOfTwo(tc->String(pipe_path.c_str()),
                                                pol.output_to_log ? tc->True() : tc->False());
         out = tc->CallRoutine(boot, bargs);
     }
@@ -863,8 +1065,7 @@ static void serve(int fd)
     }
     inst->Terminate();
     if (plugin) plugin->end();
-    close(pfd[1]);
-    pthread_join(pump, NULL);          /* all output forwarded */
+    out_close(och);
     send_result(status, has_value ? &value : NULL);
 }
 
@@ -889,10 +1090,24 @@ static void serve(int fd)
 
 enum { SLOT_EMPTY = 0, SLOT_STARTING, SLOT_IDLE, SLOT_BUSY, SLOT_RETIRE };
 
+#ifdef _WIN32
+/* In a file mapping the children inherit; Interlocked* are full barriers. */
+struct slot { volatile LONG state; DWORD pid; };
+#else
 struct slot { int state; pid_t pid; };
+#endif
 
 static struct slot *g_slots;        /* shared page, one per child           */
 
+#ifdef _WIN32
+static bool slot_cas(int i, int from, int to)
+{
+    return InterlockedCompareExchange(&g_slots[i].state, to, from) == from;
+}
+
+static void slot_set(int i, int v) { InterlockedExchange(&g_slots[i].state, v); }
+static int  slot_get(int i)        { return (int)InterlockedCompareExchange(&g_slots[i].state, 0, 0); }
+#else
 static bool slot_cas(int i, int from, int to)
 {
     return __atomic_compare_exchange_n(&g_slots[i].state, &from, to, false,
@@ -901,6 +1116,7 @@ static bool slot_cas(int i, int from, int to)
 
 static void slot_set(int i, int v) { __atomic_store_n(&g_slots[i].state, v, __ATOMIC_SEQ_CST); }
 static int  slot_get(int i)        { return __atomic_load_n(&g_slots[i].state, __ATOMIC_SEQ_CST); }
+#endif
 
 /* How often an idle child looks at its slot, and how long the pool must    */
 /* have idle children to spare before the master retires one.              */
@@ -928,12 +1144,22 @@ static bool load_plugin(const char *spec)
         return false;
     }
     const char *path = end + 1;
+#ifdef _WIN32
+    HMODULE lib = LoadLibraryA(path);
+    if (!lib) {
+        fprintf(stderr, "oorexx-host: cannot load the plugin %s: error %lu\n", path,
+                GetLastError());
+        return false;
+    }
+    orx_plugin_init_fn *init = (orx_plugin_init_fn *)(void *)GetProcAddress(lib, ORX_PLUGIN_INIT);
+#else
     void *lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
     if (!lib) {
         fprintf(stderr, "oorexx-host: cannot load the plugin %s: %s\n", path, dlerror());
         return false;
     }
     orx_plugin_init_fn *init = (orx_plugin_init_fn *)dlsym(lib, ORX_PLUGIN_INIT);
+#endif
     const orx_host_plugin *pl = init ? init(&g_api) : NULL;
     if (!pl || pl->abi != ORX_PLUGIN_ABI || pl->klass != klass) {
         fprintf(stderr, "oorexx-host: %s is not a plugin for class %ld of this host "
@@ -959,8 +1185,8 @@ static void load_anchor(void)
     opts[0].optionName = REGISTER_LIBRARY; opts[0].option = (void *)&lib;
     opts[1].optionName = NULL;
     if (!RexxCreateInterpreter(&inst, &tc, opts)) {
-        fprintf(stderr, "oorexx-host: cannot create the anchor instance\n");
-        _exit(EXIT_CONFIG);
+        err_write("oorexx-host: cannot create the anchor instance\n");
+        quit(EXIT_CONFIG);
     }
     /* The APACHE environment of native programs (its class is what this    */
     /* returns); and the preloaded packages, required.                      */
@@ -999,13 +1225,13 @@ static void load_anchor(void)
             if (c.errortext != NULLOBJECT) { m += ": "; m += tc->CString(c.errortext); }
             if (c.message != NULLOBJECT)   { m += ": "; m += tc->CString(c.message); }
         }
-        /* One write: every child fails alike, and lines must not mix.     */
         m += "\n";
-        if (write(2, m.data(), m.size()) < 0) { /* nowhere else to say it */ }
-        _exit(EXIT_CONFIG);
+        err_write(m);
+        quit(EXIT_CONFIG);
     }
 }
 
+#ifndef _WIN32
 static void child_main(int me, pid_t master, int lsock, int stopfd, int max_requests)
 {
     /* Never outlive the master. Everywhere, its death closes the stop     */
@@ -1018,8 +1244,7 @@ static void child_main(int me, pid_t master, int lsock, int stopfd, int max_requ
     signal(SIGTERM, SIG_DFL);
     signal(SIGCHLD, SIG_DFL);
     signal(SIGPIPE, SIG_IGN);
-    pthread_t t;
-    pthread_create(&t, NULL, watchdog, NULL);
+    std::thread(watchdog).detach();
 
     /* The anchor: the first instance of the process (the expensive one),   */
     /* which stays, with the APACHE environment and the preloaded packages. */
@@ -1315,3 +1540,409 @@ int main(int argc, char **argv)
     if (path) unlink(path);
     return config_error ? EXIT_CONFIG : 0;
 }
+#endif /* !_WIN32 */
+
+#ifdef _WIN32
+/* ------------------------------------------------------------------------ */
+/* The pool on Windows                                                      */
+/*                                                                          */
+/* The same pool, with what Windows has instead of fork, signals and a      */
+/* shared anonymous page:                                                   */
+/*   - the master starts each child with CreateProcess, running this same   */
+/*     executable with --child; the child inherits exactly the handles it   */
+/*     needs (PROC_THREAD_ATTRIBUTE_HANDLE_LIST): the listening socket, the */
+/*     slots (a file mapping), the stop event, a handle on the master, and  */
+/*     both ends of its output pipe, the write end as its standard output;  */
+/*   - draining is an event the master sets (the stop pipe on Unix); a      */
+/*     child that sees it, or the master gone, drains and exits;            */
+/*   - the master is told to drain by an event too: mod_orx's (--stop-event) */
+/*     or, standalone, its own, set by Ctrl+C. There is no keeper: Apache   */
+/*     never reaps the host on Windows, and mod_orx puts it in a job that   */
+/*     ends with Apache.                                                    */
+/* ------------------------------------------------------------------------ */
+
+static HANDLE g_stop_ev;            /* the master: drain                    */
+
+static BOOL WINAPI on_ctrl(DWORD)
+{
+    SetEvent(g_stop_ev);
+    return TRUE;
+}
+
+/* long is 32 bits on Windows: milliseconds since boot need more.          */
+static long long now_ms(void) { return (long long)GetTickCount64(); }
+
+static void usage(const char *argv0)
+{
+    fprintf(stderr,
+        "usage: %s (--socket PATH | --listen-fd SOCKET --stop-event HANDLE)\n"
+        "       [--processes MIN] [--max-processes MAX] [--max-requests N]\n"
+        "       [--grace SECONDS] [--preload FILE]... [--plugin CLASS:PATH]...\n", argv0);
+}
+
+static HANDLE handle_arg(const char *s)
+{
+    return (HANDLE)(uintptr_t)_strtoui64(s, NULL, 10);
+}
+
+/* One argument for a command line, quoted as the C runtime parses it.      */
+static void append_arg(std::string &cmd, const std::string &a)
+{
+    cmd += ' ';
+    if (!a.empty() && a.find_first_of(" \t\"") == std::string::npos) { cmd += a; return; }
+    cmd += '"';
+    size_t bs = 0;
+    for (char ch : a) {
+        if (ch == '\\') { bs++; continue; }
+        if (ch == '"') cmd.append(bs * 2 + 1, '\\');
+        else cmd.append(bs, '\\');
+        bs = 0;
+        cmd += ch;
+    }
+    cmd.append(bs * 2, '\\');
+    cmd += '"';
+}
+
+static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, int max_requests)
+{
+    std::thread(watchdog).detach();
+
+    /* The anchor: the first instance of the process (the expensive one),   */
+    /* which stays, with the APACHE environment and the preloaded packages. */
+    load_anchor();
+    if (!slot_cas(me, SLOT_STARTING, SLOT_IDLE)) quit(0);
+
+    bool draining = false;
+    for (int served = 0; max_requests <= 0 || served < max_requests; ) {
+        WSAPOLLFD pf;
+        pf.fd = lsock; pf.events = POLLRDNORM; pf.revents = 0;
+        int n = WSAPoll(&pf, 1, draining ? 0 : CHILD_POLL_MS);
+        if (n == SOCKET_ERROR) quit(1);
+        if (!draining && (WaitForSingleObject(stop, 0) == WAIT_OBJECT_0 ||
+                          WaitForSingleObject(master, 0) == WAIT_OBJECT_0))
+            draining = true;
+        if (n == 0 && !draining) {
+            if (slot_get(me) == SLOT_RETIRE) quit(0);
+            continue;
+        }
+        if (!slot_cas(me, SLOT_IDLE, SLOT_BUSY)) quit(0);   /* retired */
+        SOCKET fd = accept(lsock, NULL, NULL);
+        if (fd == INVALID_SOCKET) {
+            int e = WSAGetLastError();
+            slot_set(me, SLOT_IDLE);
+            if (e == WSAEWOULDBLOCK || e == WSAEINTR || e == WSAECONNABORTED ||
+                e == WSAECONNRESET) {
+                if (draining) quit(0);    /* the queue is empty: done      */
+                continue;                 /* another child took it          */
+            }
+            quit(1);
+        }
+        /* The connection must block (it inherits the listening socket's    */
+        /* non-blocking mode), and no command a program runs may inherit it. */
+        u_long blocking = 0;
+        ioctlsocket(fd, FIONBIO, &blocking);
+        SetHandleInformation((HANDLE)fd, HANDLE_FLAG_INHERIT, 0);
+        serve(fd);
+        closesocket(fd);
+        served++;
+        if (!slot_cas(me, SLOT_BUSY, SLOT_IDLE)) quit(0);
+    }
+    quit(0);
+}
+
+/* What the master hands every child: the handles, and the options that    */
+/* matter to a child.                                                       */
+struct pool {
+    SOCKET lsock;
+    HANDLE map, stop, self;
+    std::vector<std::string> child_opts;
+    std::string exe;
+    unsigned long pipes;            /* to name each output pipe uniquely    */
+};
+
+/* Start the child of slot i. Returns its process handle, or NULL.         */
+static HANDLE spawn_child(pool &p, int i, DWORD *pid)
+{
+    SECURITY_ATTRIBUTES sa = { sizeof sa, NULL, TRUE };
+    char name[96];
+    snprintf(name, sizeof name, "\\\\.\\pipe\\oorexx-host-%lu-%d-%lu",
+             GetCurrentProcessId(), i, p.pipes++);
+    HANDLE r = CreateNamedPipeA(name,
+                   PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                   PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                   1, 0, 65536, 0, &sa);
+    if (r == INVALID_HANDLE_VALUE) return NULL;
+    HANDLE w = CreateFileA(name, GENERIC_WRITE, 0, &sa, OPEN_EXISTING, 0, NULL);
+    if (w == INVALID_HANDLE_VALUE) { CloseHandle(r); return NULL; }
+    HANDLE nul = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                             OPEN_EXISTING, 0, NULL);
+    /* Standard error: the master's (Apache's error log, when managed).     */
+    HANDLE err = NULL, e0 = GetStdHandle(STD_ERROR_HANDLE);
+    if (e0 && e0 != INVALID_HANDLE_VALUE)
+        DuplicateHandle(GetCurrentProcess(), e0, GetCurrentProcess(), &err, 0, TRUE,
+                        DUPLICATE_SAME_ACCESS);
+
+    std::vector<HANDLE> inherit;
+    inherit.push_back((HANDLE)p.lsock);
+    inherit.push_back(p.map); inherit.push_back(p.stop); inherit.push_back(p.self);
+    inherit.push_back(r); inherit.push_back(w);
+    if (nul != INVALID_HANDLE_VALUE) inherit.push_back(nul);
+    if (err) inherit.push_back(err);
+
+    SIZE_T size = 0;
+    InitializeProcThreadAttributeList(NULL, 1, 0, &size);
+    std::vector<char> attrs(size);
+    LPPROC_THREAD_ATTRIBUTE_LIST al = (LPPROC_THREAD_ATTRIBUTE_LIST)&attrs[0];
+    HANDLE proc = NULL;
+    if (InitializeProcThreadAttributeList(al, 1, 0, &size) &&
+        UpdateProcThreadAttribute(al, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, &inherit[0],
+                                  inherit.size() * sizeof(HANDLE), NULL, NULL)) {
+        char spec[160];
+        snprintf(spec, sizeof spec, "%d:%llu:%llu:%llu:%llu:%llu", i,
+                 (unsigned long long)p.lsock, (unsigned long long)(uintptr_t)p.map,
+                 (unsigned long long)(uintptr_t)p.stop, (unsigned long long)(uintptr_t)p.self,
+                 (unsigned long long)(uintptr_t)r);
+        std::string cmd;
+        append_arg(cmd, p.exe);
+        cmd.erase(0, 1);
+        append_arg(cmd, "--child");
+        append_arg(cmd, spec);
+        for (size_t k = 0; k < p.child_opts.size(); k++) append_arg(cmd, p.child_opts[k]);
+
+        STARTUPINFOEXA si;
+        memset(&si, 0, sizeof si);
+        si.StartupInfo.cb = sizeof si;
+        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        si.StartupInfo.hStdInput  = nul != INVALID_HANDLE_VALUE ? nul : NULL;
+        si.StartupInfo.hStdOutput = w;
+        si.StartupInfo.hStdError  = err;
+        si.lpAttributeList = al;
+        PROCESS_INFORMATION pi;
+        std::vector<char> line(cmd.begin(), cmd.end());
+        line.push_back('\0');
+        if (CreateProcessA(p.exe.c_str(), &line[0], NULL, NULL, TRUE,
+                           EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW, NULL, NULL,
+                           &si.StartupInfo, &pi)) {
+            CloseHandle(pi.hThread);
+            proc = pi.hProcess;
+            *pid = pi.dwProcessId;
+        }
+        DeleteProcThreadAttributeList(al);
+    }
+    CloseHandle(r); CloseHandle(w);
+    if (nul != INVALID_HANDLE_VALUE) CloseHandle(nul);
+    if (err) CloseHandle(err);
+    return proc;
+}
+
+/* A child: --child SLOT:SOCKET:MAP:STOP:MASTER:PIPE (handle values).       */
+static int run_child(const char *spec, int max_requests)
+{
+    unsigned long long v[6];
+    int me;
+    if (sscanf(spec, "%d:%llu:%llu:%llu:%llu:%llu", &me, &v[1], &v[2], &v[3], &v[4], &v[5]) != 6)
+        return EXIT_CONFIG;
+    SOCKET lsock  = (SOCKET)v[1];
+    HANDLE map    = (HANDLE)(uintptr_t)v[2];
+    HANDLE stop   = (HANDLE)(uintptr_t)v[3];
+    HANDLE master = (HANDLE)(uintptr_t)v[4];
+    g_out_r       = (HANDLE)(uintptr_t)v[5];
+    /* None of these is for the commands a program may run.                */
+    SetHandleInformation((HANDLE)lsock, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(map, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(stop, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(master, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(g_out_r, HANDLE_FLAG_INHERIT, 0);
+    g_slots = (struct slot *)MapViewOfFile(map, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+    if (!g_slots) return 1;
+    memset(&g_ov, 0, sizeof g_ov);
+    g_ov.hEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+    g_phase_done = CreateEventA(NULL, TRUE, FALSE, NULL);
+    if (!g_ov.hEvent || !g_phase_done) return 1;
+    child_main(me, lsock, stop, master, max_requests);
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    const char *path = NULL, *child = NULL, *stop_arg = NULL;
+    SOCKET listen_fd = INVALID_SOCKET;
+    int min_procs = 4, max_procs = -1, max_requests = 1000, grace = 70;
+    std::vector<std::string> child_opts;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--socket") && i + 1 < argc)               path = argv[++i];
+        else if (!strcmp(argv[i], "--listen-fd") && i + 1 < argc)
+            listen_fd = (SOCKET)_strtoui64(argv[++i], NULL, 10);
+        else if (!strcmp(argv[i], "--stop-event") && i + 1 < argc)      stop_arg = argv[++i];
+        else if (!strcmp(argv[i], "--child") && i + 1 < argc)           child = argv[++i];
+        else if (!strcmp(argv[i], "--processes") && i + 1 < argc)       min_procs = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--max-processes") && i + 1 < argc)   max_procs = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--max-requests") && i + 1 < argc) {
+            max_requests = atoi(argv[++i]);
+            child_opts.push_back(argv[i - 1]); child_opts.push_back(argv[i]);
+        }
+        else if (!strcmp(argv[i], "--grace") && i + 1 < argc)           grace = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--preload") && i + 1 < argc) {
+            g_preload.push_back(argv[++i]);
+            child_opts.push_back(argv[i - 1]); child_opts.push_back(argv[i]);
+        }
+        else if (!strcmp(argv[i], "--plugin") && i + 1 < argc) {
+            if (!load_plugin(argv[++i])) return EXIT_CONFIG;
+            child_opts.push_back(argv[i - 1]); child_opts.push_back(argv[i]);
+        }
+        else { usage(argv[0]); return EXIT_CONFIG; }
+    }
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        fprintf(stderr, "oorexx-host: WSAStartup failed\n");
+        return EXIT_CONFIG;
+    }
+    if (child) return run_child(child, max_requests);
+
+    if (max_procs < 0) max_procs = min_procs;
+    if ((path == NULL) == (listen_fd == INVALID_SOCKET) || (listen_fd != INVALID_SOCKET && !stop_arg)
+        || min_procs < 1 || max_procs < min_procs || grace < 0) {
+        usage(argv[0]);
+        return EXIT_CONFIG;
+    }
+
+    pool p;
+    p.pipes = 0;
+    p.child_opts = child_opts;
+    {
+        char exe[MAX_PATH * 2];
+        DWORD n = GetModuleFileNameA(NULL, exe, sizeof exe);
+        if (n == 0 || n >= sizeof exe) { fprintf(stderr, "oorexx-host: own path?\n"); return 1; }
+        p.exe = exe;
+    }
+
+    SOCKET lsock = listen_fd;
+    if (path) {
+        /* Standalone: bind the socket ourselves. Who may connect is what   */
+        /* the directory's ACL allows: put it in a directory of your own.   */
+        lsock = socket(AF_UNIX, SOCK_STREAM, 0);
+        struct sockaddr_un sa; memset(&sa, 0, sizeof sa);
+        sa.sun_family = AF_UNIX;
+        if (lsock == INVALID_SOCKET || strlen(path) >= sizeof sa.sun_path) {
+            fprintf(stderr, "oorexx-host: socket path too long, or no socket\n");
+            return EXIT_CONFIG;
+        }
+        strcpy(sa.sun_path, path);
+        DeleteFileA(path);
+        if (bind(lsock, (struct sockaddr *)&sa, sizeof sa) != 0 || listen(lsock, 128) != 0) {
+            fprintf(stderr, "oorexx-host: bind/listen: WSA error %d\n", WSAGetLastError());
+            return EXIT_CONFIG;
+        }
+        g_stop_ev = CreateEventA(NULL, TRUE, FALSE, NULL);
+        SetConsoleCtrlHandler(on_ctrl, TRUE);
+    } else {
+        /* Managed by mod_orx: the module created, bound and secured the    */
+        /* socket and owns its path; we only accept on it, and drain when   */
+        /* it sets the event.                                               */
+        int type = 0, tl = sizeof type;
+        if (getsockopt(lsock, SOL_SOCKET, SO_TYPE, (char *)&type, &tl) != 0 ||
+            type != SOCK_STREAM) {
+            fprintf(stderr, "oorexx-host: --listen-fd %llu is not a stream socket\n",
+                    (unsigned long long)lsock);
+            return EXIT_CONFIG;
+        }
+        g_stop_ev = handle_arg(stop_arg);
+        SetHandleInformation(g_stop_ev, HANDLE_FLAG_INHERIT, 0);
+    }
+    u_long nonblocking = 1;
+    ioctlsocket(lsock, FIONBIO, &nonblocking);
+    SetHandleInformation((HANDLE)lsock, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+    p.lsock = lsock;
+
+    SECURITY_ATTRIBUTES isa = { sizeof isa, NULL, TRUE };
+    DWORD bytes = (DWORD)(sizeof(struct slot) * max_procs);
+    p.map = CreateFileMappingA(INVALID_HANDLE_VALUE, &isa, PAGE_READWRITE, 0, bytes, NULL);
+    g_slots = p.map ? (struct slot *)MapViewOfFile(p.map, FILE_MAP_ALL_ACCESS, 0, 0, 0) : NULL;
+    if (!g_slots) { fprintf(stderr, "oorexx-host: no shared slots\n"); return 1; }
+    memset(g_slots, 0, bytes);
+    p.stop = CreateEventA(&isa, TRUE, FALSE, NULL);
+    if (!p.stop ||
+        !DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), &p.self,
+                         SYNCHRONIZE, TRUE, 0)) {
+        fprintf(stderr, "oorexx-host: no stop event\n");
+        return 1;
+    }
+
+    std::vector<HANDLE> procs(max_procs, (HANDLE)NULL);
+    long long idle_since = -1;
+    bool config_error = false;
+    for (;;) {
+        for (int i = 0; i < max_procs; i++) {
+            if (!procs[i] || WaitForSingleObject(procs[i], 0) != WAIT_OBJECT_0) continue;
+            DWORD code = 0;
+            GetExitCodeProcess(procs[i], &code);
+            CloseHandle(procs[i]); procs[i] = NULL;
+            g_slots[i].pid = 0; slot_set(i, SLOT_EMPTY);
+            /* A child that cannot start (its preload failed) would fail    */
+            /* again in every replacement: stop, and say why on the way out. */
+            if (code == EXIT_CONFIG) config_error = true;
+        }
+        if (config_error) break;
+
+        int total = 0, ready = 0, idle = 0;
+        for (int i = 0; i < max_procs; i++) {
+            int s = slot_get(i);
+            if (s == SLOT_EMPTY) continue;
+            total++;
+            if (s == SLOT_IDLE) idle++;
+            if (s == SLOT_IDLE || s == SLOT_STARTING) ready++;
+        }
+
+        int want = 0;
+        if (total < min_procs) want = min_procs - total;
+        else if (ready == 0 && total < max_procs) want = 1;
+        for (int i = 0; i < max_procs && want > 0; i++) {
+            if (slot_get(i) != SLOT_EMPTY) continue;
+            slot_set(i, SLOT_STARTING);
+            DWORD pid = 0;
+            HANDLE h = spawn_child(p, i, &pid);
+            if (!h) {
+                slot_set(i, SLOT_EMPTY);
+                fprintf(stderr, "oorexx-host: cannot start a child: error %lu\n", GetLastError());
+                break;
+            }
+            procs[i] = h;
+            g_slots[i].pid = pid;
+            want--;
+        }
+
+        /* Shrink: more than one child idle, and above the minimum, for     */
+        /* SHRINK_AFTER_MS on end: retire one idle child, then wait again.  */
+        if (idle > 1 && total > min_procs) {
+            if (idle_since < 0) idle_since = now_ms();
+            else if (now_ms() - idle_since >= SHRINK_AFTER_MS) {
+                for (int i = 0; i < max_procs; i++)
+                    if (slot_cas(i, SLOT_IDLE, SLOT_RETIRE)) break;
+                idle_since = -1;
+            }
+        } else idle_since = -1;
+
+        if (WaitForSingleObject(g_stop_ev, MASTER_TICK_MS) == WAIT_OBJECT_0) break;
+    }
+
+    /* Drain: tell the children, give them --grace seconds, then kill.      */
+    SetEvent(p.stop);
+    long long deadline = now_ms() + grace * 1000LL;
+    for (;;) {
+        int left = 0;
+        for (int i = 0; i < max_procs; i++) {
+            if (!procs[i]) continue;
+            if (WaitForSingleObject(procs[i], 0) == WAIT_OBJECT_0) {
+                CloseHandle(procs[i]); procs[i] = NULL;
+                g_slots[i].pid = 0; slot_set(i, SLOT_EMPTY);
+            } else left++;
+        }
+        if (left == 0 || now_ms() >= deadline) break;
+        Sleep(MASTER_TICK_MS);
+    }
+    for (int i = 0; i < max_procs; i++)
+        if (procs[i]) { TerminateProcess(procs[i], 1); CloseHandle(procs[i]); }
+    if (path) { closesocket(lsock); DeleteFileA(path); }
+    return config_error ? EXIT_CONFIG : 0;
+}
+#endif /* _WIN32 */

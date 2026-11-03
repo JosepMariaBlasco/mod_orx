@@ -1,0 +1,75 @@
+# mod_orx on Windows: build it with MSVC against Apache Lounge's Apache and
+# the ooRexx installer's API, and run tests/windows.ps1 (Apache with mod_orx,
+# serving Rexx CGI programs). Windows 10 1803 or Server 2019 at least.
+
+name: Windows
+
+on:
+  push:
+    paths:
+      - 'module/**'
+      - 'host/**'
+      - 'include/**'
+      - 'build.cmd'
+      - 'tests/windows.ps1'
+      - '.github/workflows/windows.yml'
+  workflow_dispatch:
+
+env:
+  OOREXX_FILES: https://sourceforge.net/projects/oorexx/files/oorexx/5.3.0beta
+  OOREXX_REV: "13358"
+
+jobs:
+  windows:
+    name: Windows Server 2022, Apache Lounge
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: ooRexx, extracted from the installer
+        shell: pwsh
+        run: |
+          $oo = "$env:RUNNER_TEMP\oorexx"
+          curl.exe -sSfL -o "$env:RUNNER_TEMP\oorexx.exe" "$env:OOREXX_FILES/oorexx-5.3.0-$env:OOREXX_REV.windows.x86_64.exe/download"
+          7z x -y "-o$oo" "$env:RUNNER_TEMP\oorexx.exe" | Out-Null
+          "OOREXX=$oo" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          # Starts rxapi, outside the job mod_orx puts its host in.
+          $v = (& "$oo\rexx.exe" -v | Select-Object -First 1)
+          $os = (Get-CimInstance Win32_OperatingSystem)
+          echo "::notice title=Windows setup::$v; $($os.Caption) build $($os.BuildNumber); $env:NUMBER_OF_PROCESSORS CPUs"
+
+      - name: Apache (Apache Lounge's zip)
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          # The zip's name changes with every release: take it from the download page.
+          $ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) mod_orx-ci'
+          $page = (Invoke-WebRequest -UseBasicParsing -UserAgent $ua -TimeoutSec 60 https://www.apachelounge.com/download/).Content
+          $m = [regex]::Match($page, 'href="([^"]*httpd-2\.4\.[0-9]+-[0-9]+-[Ww]in64-VS[0-9]+\.zip)"')
+          if (-not $m.Success) { echo "::error title=Apache::no Win64 zip on the download page"; exit 1 }
+          $url = [Uri]::new([Uri]'https://www.apachelounge.com/download/', $m.Groups[1].Value).AbsoluteUri
+          Invoke-WebRequest -UseBasicParsing -UserAgent $ua -TimeoutSec 180 $url -OutFile "$env:RUNNER_TEMP\httpd.zip"
+          Expand-Archive "$env:RUNNER_TEMP\httpd.zip" C:\Apache -Force
+          $h = Get-ChildItem C:\Apache -Recurse -Filter httpd.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $h) { echo "::error title=Apache::httpd.exe not found in $url"; exit 1 }
+          $ap = $h.Directory.Parent.FullName
+          "APACHE=$ap" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          echo "::notice title=Apache::$(& $h.FullName -v | Select-Object -First 1); $url"
+
+      - name: Build
+        shell: cmd
+        run: build.cmd "%OOREXX%" "%APACHE%"
+
+      - name: Apache with mod_orx
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          $out = (& tests\windows.ps1 -Apache $env:APACHE -OoRexx $env:OOREXX 2>&1) | Out-String
+          $rc = $LASTEXITCODE
+          $out
+          $lines = $out -split "`n" | Where-Object { $_ -match '^(PASS|FAIL|RESULT)' }
+          $fails = @($lines | Where-Object { $_ -like 'FAIL*' })
+          if ($fails.Count) { echo "::error title=mod_orx on Windows::$($fails -join '%0A')" }
+          echo "::notice title=mod_orx on Windows::$($lines -join '%0A')"
+          exit $rc

@@ -17,9 +17,11 @@
  * Module -> host:  BEGIN, [ARGS], VARS, BODY
  * Host -> module:  READ, UPDATE, DATA, LOG, RESULT
  *
- * This header is shared by the module (C) and the host (C++). It holds only
- * POSIX file-descriptor helpers; the Windows transport is still to be
- * decided.
+ * This header is shared by the module (C) and the host (C++). The transport
+ * is a stream socket: an AF_UNIX socket everywhere, Windows included
+ * (Windows 10 1803 or Server 2019 at least). On Unix it is a descriptor,
+ * read and written with read() and write(); on Windows, a SOCKET, with
+ * recv() and send(). oorx_sock_t names either.
  */
 
 #ifndef OOREXX_PROTOCOL_H
@@ -29,7 +31,15 @@
 #include <stddef.h>
 #include <string.h>
 #include <errno.h>
+#ifdef _WIN32
+#include <winsock2.h>
+typedef SOCKET oorx_sock_t;
+#define OORX_NO_SOCK INVALID_SOCKET
+#else
 #include <unistd.h>
+typedef int oorx_sock_t;
+#define OORX_NO_SOCK (-1)
+#endif
 
 #define OORX_PROTOCOL_VERSION 1
 
@@ -137,24 +147,34 @@ static inline uint32_t oorx_get_u32(const unsigned char *p)
 }
 
 /* Write exactly len bytes. Returns 0, or -1 on error. */
-static inline int oorx_write_all(int fd, const void *buf, size_t len)
+static inline int oorx_write_all(oorx_sock_t fd, const void *buf, size_t len)
 {
     const char *p = (const char *)buf;
     while (len > 0) {
+#ifdef _WIN32
+        int n = send(fd, p, len > 0x40000000 ? 0x40000000 : (int)len, 0);
+        if (n == SOCKET_ERROR) return -1;
+#else
         ssize_t n = write(fd, p, len);
         if (n < 0) { if (errno == EINTR) continue; return -1; }
+#endif
         p += n; len -= (size_t)n;
     }
     return 0;
 }
 
 /* Read exactly len bytes. Returns 0, or -1 on error or premature EOF. */
-static inline int oorx_read_all(int fd, void *buf, size_t len)
+static inline int oorx_read_all(oorx_sock_t fd, void *buf, size_t len)
 {
     char *p = (char *)buf;
     while (len > 0) {
+#ifdef _WIN32
+        int n = recv(fd, p, len > 0x40000000 ? 0x40000000 : (int)len, 0);
+        if (n == SOCKET_ERROR) return -1;
+#else
         ssize_t n = read(fd, p, len);
         if (n < 0) { if (errno == EINTR) continue; return -1; }
+#endif
         if (n == 0) return -1;
         p += n; len -= (size_t)n;
     }
@@ -162,7 +182,7 @@ static inline int oorx_read_all(int fd, void *buf, size_t len)
 }
 
 /* Send one frame. Returns 0, or -1 on error. */
-static inline int oorx_send(int fd, int type, int flags,
+static inline int oorx_send(oorx_sock_t fd, int type, int flags,
                             const void *payload, uint32_t len)
 {
     unsigned char h[OORX_HEADER_SIZE];
@@ -173,7 +193,7 @@ static inline int oorx_send(int fd, int type, int flags,
 }
 
 /* Read one frame header. Returns 0, or -1 on error or an oversized frame. */
-static inline int oorx_recv_header(int fd, int *type, int *flags,
+static inline int oorx_recv_header(oorx_sock_t fd, int *type, int *flags,
                                    uint32_t *len)
 {
     unsigned char h[OORX_HEADER_SIZE];
