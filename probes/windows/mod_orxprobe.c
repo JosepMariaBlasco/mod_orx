@@ -10,7 +10,9 @@
  * Copyright 2026 Josep Maria Blasco -- Apache License 2.0
  */
 #define WIN32_LEAN_AND_MEAN
+#define _CRT_SECURE_NO_WARNINGS
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <afunix.h>
 #include <windows.h>
 #include <stdio.h>
@@ -18,6 +20,7 @@
 
 #include "httpd.h"
 #include "http_config.h"
+#include "http_core.h"
 #include "http_log.h"
 #include "http_protocol.h"
 #include "ap_mpm.h"
