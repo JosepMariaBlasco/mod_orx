@@ -307,10 +307,11 @@ $slow = Start-Process curl.exe -ArgumentList '-s', '-m', '30', '-o', "$env:TEMP\
 Start-Sleep 1
 & "$Apache\bin\httpd.exe" -k restart -n OrxTest 2>&1 | Out-Null
 Start-Sleep 4
-$new = (hosts | Where-Object { $_.ParentProcessId -eq $svc }).ProcessId
+# The old master is still there, draining the request in flight.
+$new = (hosts | Where-Object { $_.ParentProcessId -eq $svc -and $_.ProcessId -ne $old }).ProcessId
 $trace += "  restarted: old master $old, new $new; hosts: $(pool)"
 $r = get '/rexx/hello.rex?restarted=1'
-check 'after a restart, a new host serves' (@($new).Count -eq 1 -and $new -ne $old -and
+check 'after a restart, a new host serves' (@($new).Count -eq 1 -and
       $r.body -eq 'hello restarted=1 GET') "[$($r.body)] (old $old, new $new)"
 $slow.WaitForExit(30000) | Out-Null
 $body = (Get-Content "$env:TEMP\orx-slow.txt" -Raw)

@@ -1668,19 +1668,21 @@ static void append_arg(std::string &cmd, const std::string &a)
 /*                                                                          */
 /* A watcher thread does what the poll timeout does on Unix: it sees the    */
 /* stop event, the master's death and a retirement. Then a child waiting   */
-/* for the mutex leaves (the leave event), and one in accept() has its     */
-/* handle on the socket closed, which ends the accept; a connection taken   */
-/* just before is still served. Draining, the child stops once it has waited */
-/* 200 ms with nothing to take: the module has removed the socket's path by */
-/* then, so nothing new can arrive.                                         */
+/* for the mutex leaves (the leave event), and one in accept() has it      */
+/* cancelled (CancelSynchronousIo: closing the socket's handle does not end */
+/* a blocking accept on AF_UNIX, measured), again every 100 ms until the   */
+/* child is gone, in case the cancel came just before the accept began; a  */
+/* connection taken just before is still served. Draining, the child stops */
+/* once it has waited 200 ms with nothing to take: the module has removed  */
+/* the socket's path by then, so nothing new can arrive.                   */
 #define DRAIN_IDLE_MS 200
 enum { W_BUSY = 0, W_MUTEX, W_ACCEPT };
 static volatile LONG      g_wstate = W_BUSY;
 static volatile long long g_wait_since;
-static volatile LONG      g_closing;        /* the watcher closed the socket */
+static volatile LONG      g_closing;        /* the watcher said: leave       */
 static HANDLE             g_leave;          /* set: stop waiting, leave      */
 
-static void accept_watch(int me, SOCKET lsock, HANDLE stop, HANDLE master)
+static void accept_watch(int me, HANDLE main_thread, HANDLE stop, HANDLE master)
 {
     HANDLE hs[2] = { stop, master };
     bool draining = false;
@@ -1690,17 +1692,21 @@ static void accept_watch(int me, SOCKET lsock, HANDLE stop, HANDLE master)
             draining = true;
             TRACE("draining");
         }
+        if (draining) Sleep(20);               /* the stop events stay set */
         LONG st = InterlockedCompareExchange(&g_wstate, 0, 0);
+        if (InterlockedCompareExchange(&g_closing, 0, 0)) {
+            if (st == W_ACCEPT) CancelSynchronousIo(main_thread);
+            Sleep(80);
+            continue;
+        }
         bool retired = slot_get(me) == SLOT_RETIRE;
         if (st != W_BUSY && (retired || (draining &&
             (long long)GetTickCount64() - g_wait_since >= DRAIN_IDLE_MS))) {
             TRACE(retired ? "retired" : "drained");
             InterlockedExchange(&g_closing, 1);
             SetEvent(g_leave);
-            closesocket(lsock);
-            return;
+            if (st == W_ACCEPT) CancelSynchronousIo(main_thread);
         }
-        if (draining) Sleep(20);               /* the stop events stay set */
     }
 }
 
@@ -1716,7 +1722,11 @@ static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, HANDLE 
     if (!slot_cas(me, SLOT_STARTING, SLOT_IDLE)) { TRACE("slot %lld: not STARTING", me); quit(0); }
     g_leave = CreateEventA(NULL, TRUE, FALSE, NULL);
     if (!g_leave) die("no leave event");
-    std::thread(accept_watch, me, lsock, stop, master).detach();
+    HANDLE self_thread;
+    if (!DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(),
+                         &self_thread, 0, FALSE, DUPLICATE_SAME_ACCESS))
+        die("no handle on the main thread");
+    std::thread(accept_watch, me, self_thread, stop, master).detach();
 
     for (int served = 0; max_requests <= 0 || served < max_requests; ) {
         g_wait_since = (long long)GetTickCount64();
@@ -1724,7 +1734,7 @@ static void child_main(int me, SOCKET lsock, HANDLE stop, HANDLE master, HANDLE 
         HANDLE hs[2] = { mutex, g_leave };
         DWORD w = WaitForMultipleObjects(2, hs, FALSE, INFINITE);
         if (w != WAIT_OBJECT_0 && w != WAIT_ABANDONED_0) quit(0);   /* leave */
-        /* The watcher may have closed the socket meanwhile.                */
+        /* The watcher may have said to leave meanwhile.                    */
         if (InterlockedCompareExchange(&g_closing, 0, 0)) { ReleaseMutex(mutex); quit(0); }
         InterlockedExchange(&g_wstate, W_ACCEPT);
         SOCKET fd = accept(lsock, NULL, NULL);
