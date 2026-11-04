@@ -65,7 +65,6 @@ jobs:
       - name: The suite through mod_cgi (the reference)
         shell: pwsh
         timeout-minutes: 18
-        continue-on-error: true
         run: |
           & tests\rexxhttp-suite.ps1 -Apache $env:APACHE -OoRexx $env:OOREXX -RexxHTTP $env:REXXHTTP `
               -Handler cgi -Out "$env:RUNNER_TEMP\suite-cgi.txt"
