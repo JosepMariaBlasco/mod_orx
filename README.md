@@ -511,6 +511,15 @@ Apache as a service: a restart with a request in flight, and a stop. It
 also measures requests per second against the same program under mod_cgi.
 `.github/workflows/windows.yml` runs it on Windows Server 2022.
 
+`tests/rexxhttp-suite.ps1` is `tests/rexxhttp-suite.sh` for Windows:
+RexxHTTP's runner targets Linux, so it lays out the same montage itself (the
+sources, the fixtures and their `.htaccess`, the CGI-contract matrix) in an
+Apache for Windows, at the same URLs and, on Apache's drive, the same disk
+paths, and runs RexxHTTP's HTTP suite unchanged, through mod_orx or, with
+`-Handler cgi`, through mod_cgi. `.github/workflows/windows-rexxhttp.yml`
+runs it both ways; green is the same counts as on Linux, 0 failures, 0
+errors and an empty error log.
+
 The suite and these tests run without the mod_rexx layer. Its own
 tests, `tests/modrexx.sh` and `tests/modrexx-phases.sh`, load it for their
 run: see [modrexx/README.md](modrexx/README.md).
