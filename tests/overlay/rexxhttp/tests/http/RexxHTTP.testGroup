@@ -1,0 +1,1882 @@
+#!/usr/bin/env rexx
+/******************************************************************************/
+/*                                                                            */
+/* RexxHTTP.testGroup - Integration tests for the RexxHTTP rexxlet processor  */
+/* ========================================================================   */
+/*                                                                            */
+/* This file is part of the RexxHTTP package                                  */
+/* [See https://rexx.epbcn.com/rexxhttp/]                                     */
+/*                                                                            */
+/* Copyright (c) 2006-2026 Josep Maria Blasco <josep.maria.blasco@epbcn.com>  */
+/*                                                                            */
+/* License: Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0)  */
+/*                                                                            */
+/* These tests exercise the RexxHTTP pipeline end-to-end via Apache + curl:   */
+/* a request goes through Apache to the wrapper, which Calls RexxHTTP.rex,     */
+/* which runs the rexxlet; the generated response is then verified.           */
+/*                                                                            */
+/* They require a running Apache with the RexxHTTP pipeline configured and     */
+/* the fixtures from fixtures/ deployed as rexxlets. Run via:                  */
+/*   rexx tests/http/RunHTTPTests.rex                                          */
+/*                                                                            */
+/* Version history:                                                           */
+/*                                                                            */
+/* Date     Version Details                                                   */
+/* -------- ------- --------------------------------------------------------- */
+/* 20260611    1.0  First version                                             */
+/*                                                                            */
+/******************************************************************************/
+
+parse source . . fileSpec
+group = .TestGroup~new(fileSpec)
+group~add(.RexxHTTP.testGroup)
+If group~isAutomatedTest Then
+  Return group
+Else
+  Return group~suite~execute~~print
+
+::Requires "ooTest.frm"
+::Requires "HTTPTestCase.cls"
+
+::Class RexxHTTP.testGroup Subclass HTTPTestCase Public
+
+/******************************************************************************/
+/* Class-level configuration: base URL and the path under which the fixture   */
+/* rexxlets are served. Both are overridable from the environment so the      */
+/* runner can point the suite at whatever deployment it set up. Defaults       */
+/* match the v4 montage (fixtures deployed under /test/).                      */
+/******************************************************************************/
+
+::Attribute baseURL     Class
+::Attribute fixturePath Class
+
+::Method activate Class
+  base = Value("REXXHTTP_TEST_BASEURL", , "ENVIRONMENT")
+  If base == "" Then base = "http://127.0.0.1"
+  self~baseURL = base
+
+  fp = Value("REXXHTTP_TEST_PATH", , "ENVIRONMENT")
+  If fp == "" Then fp = "/test/"
+  self~fixturePath = fp
+
+/******************************************************************************/
+/* Helper: build the full URL for a fixture rexxlet (plus optional query).    */
+/******************************************************************************/
+
+::Method url
+  Use Strict Arg fixture
+  Return self~class~baseURL || self~class~fixturePath || fixture
+
+/******************************************************************************/
+/* Hello world: the smoke test. Status, content type, body, and the LF body   */
+/* convention (no CR in the body — the v4 eol sanitation).                    */
+/******************************************************************************/
+
+::Method test_hola_status_200
+  r = self~httpGet(self~url("hola"))
+  self~assertEquals("200", r~entry("status"), -
+    "hola returns HTTP 200")
+
+::Method test_hola_body
+  r = self~httpGet(self~url("hola"))
+  self~assertContains(r~entry("body"), "Hola, mundo", -
+    "hola returns the expected body")
+
+::Method test_hola_content_type
+  r = self~httpGet(self~url("hola"))
+  self~assertHeader(r~entry("headers"), "Content-Type", "text/plain", -
+    "hola sets Content-Type text/plain")
+
+::Method test_hola_body_is_lf
+  -- The HTTP body uses LF, not CRLF (v4: body eol fixed to '0a'x). The raw
+  -- body as curl received it must not contain a CR before the newline.
+  r = self~httpGet(self~url("hola"))
+  self~assertNotContains(r~entry("body"), "0D"x, -
+    "hola body has no CR (LF-only body convention)")
+
+/******************************************************************************/
+/* Content type override: a rexxlet may set text/html.                        */
+/******************************************************************************/
+
+::Method test_htmltype_content_type
+  r = self~httpGet(self~url("htmltype"))
+  self~assertHeader(r~entry("headers"), "Content-Type", "text/html", -
+    "htmltype overrides Content-Type to text/html")
+
+/******************************************************************************/
+/* Header-key normalisation across all three access forms: []/[]= (bracket),  */
+/* unknown/unknown= (bare attribute, e.g. content_type), and unknown/unknown= */
+/* via a QUOTED message send (e.g. response~"Content type"=...). A quoted     */
+/* message is not a plain identifier, so it can carry a space where a bare    */
+/* attribute name never could -- this is a real, separate way in, not just    */
+/* the bracket form in disguise. All three must resolve to the SAME slot,     */
+/* whichever of dash/underscore/space separates the words (audit-core-        */
+/* 20260725.md 2.6, plus the space enhancement on top of the audit's fix).    */
+/* Two symptoms to rule out per separator: the type staying at the text/plain */
+/* default (dead write, wrong slot), and a second, stray Content-Type-shaped  */
+/* header line alongside the real one.                                       */
+/******************************************************************************/
+
+::Method test_bracket_underscore_sets_content_type
+  r = self~httpGet(self~url("ctnorm"))
+  self~assertHeader(r~entry("headers"), "Content-Type", "text/html", -
+    'response["Content_Type"]=... lands in the real Content-Type slot')
+  self~assertHeader(r~entry("headers"), "Content-Type", "iso-8859-1", -
+    "the fixture's actual value (not the text/plain default) made it through")
+
+::Method test_bracket_underscore_no_duplicate_header
+  r = self~httpGet(self~url("ctnorm"))
+  headerLines = r~entry("headers")~makeArray("0A"x)
+  count = 0
+  Do line Over headerLines
+    Parse Var line hname ":"
+    If hname~strip~caselessCompare("Content-Type") == 0 Then count += 1
+  End
+  self~assertTrue(count == 1, -
+    "exactly one Content-Type header line, no stray duplicate from the" -
+    "unnormalised bracket key")
+
+::Method test_bracket_space_sets_content_type
+  r = self~httpGet(self~url("ctnormsp"))
+  self~assertHeader(r~entry("headers"), "Content-Type", "text/html", -
+    'response["Content Type"]=... (space separator) lands in the real slot')
+  self~assertHeader(r~entry("headers"), "Content-Type", "iso-8859-1", -
+    "the fixture's actual value (not the text/plain default) made it through")
+
+::Method test_bracket_space_no_duplicate_header
+  r = self~httpGet(self~url("ctnormsp"))
+  headerLines = r~entry("headers")~makeArray("0A"x)
+  count = 0
+  Do line Over headerLines
+    Parse Var line hname ":"
+    If hname~strip~caselessCompare("Content-Type") == 0 Then count += 1
+  End
+  self~assertTrue(count == 1, -
+    "exactly one Content-Type header line, no stray duplicate from the" -
+    "space-separator bracket key")
+
+::Method test_quoted_message_space_sets_content_type
+  r = self~httpGet(self~url("ctnormqm"))
+  self~assertHeader(r~entry("headers"), "Content-Type", "text/html", -
+    'response~"Content type"=... (quoted message, space) lands in the real slot')
+  self~assertHeader(r~entry("headers"), "Content-Type", "iso-8859-1", -
+    "the fixture's actual value (not the text/plain default) made it through")
+
+::Method test_quoted_message_space_no_duplicate_header
+  r = self~httpGet(self~url("ctnormqm"))
+  headerLines = r~entry("headers")~makeArray("0A"x)
+  count = 0
+  Do line Over headerLines
+    Parse Var line hname ":"
+    If hname~strip~caselessCompare("Content-Type") == 0 Then count += 1
+  End
+  self~assertTrue(count == 1, -
+    "exactly one Content-Type header line, no stray duplicate from the" -
+    "quoted-message space-separator key")
+
+::Method test_bracket_extra_whitespace_sets_content_type
+  -- v104: leading/trailing/multiple-internal blanks in the key must collapse
+  -- to the one CONTENT-TYPE slot ("  content   type  " and " Content-Type ").
+  r = self~httpGet(self~url("ctnormws"))
+  self~assertHeader(r~entry("headers"), "Content-Type", "text/html", -
+    'response["  content   type  "]=... collapses to the real slot')
+  self~assertHeader(r~entry("headers"), "Content-Type", "iso-8859-1", -
+    "the last write (via the trimmed key) is the value that survives")
+
+::Method test_bracket_extra_whitespace_no_duplicate_header
+  -- The messy key and the trimmed key must be the SAME slot: the first write
+  -- (text/plain) is overwritten, not left as a second Content-Type line.
+  r = self~httpGet(self~url("ctnormws"))
+  headerLines = r~entry("headers")~makeArray("0A"x)
+  count = 0
+  Do line Over headerLines
+    Parse Var line hname ":"
+    If hname~strip~caselessCompare("Content-Type") == 0 Then count += 1
+  End
+  self~assertTrue(count == 1, -
+    "exactly one Content-Type header: extra-whitespace and trimmed keys" -
+    "normalise to the same slot, no duplicate")
+
+/******************************************************************************/
+/* GET arguments: count, order, duplicates, URL-decoding.                     */
+/******************************************************************************/
+
+::Method test_get_arg_count
+  r = self~httpGet(self~url("multi?a=1&b=2&c=3"))
+  self~assertContains(r~entry("body"), "count=3", -
+    "GET args: three arguments counted")
+
+::Method test_get_arg_order_preserved
+  r = self~httpGet(self~url("multi?a=1&b=2&c=3"))
+  self~assertContains(r~entry("body"), "1: a=1", -
+    "GET args: first positional arg preserved in order")
+
+::Method test_get_arg_duplicate_rejected
+  -- Strict policy (REXXHTTP_ARGPOLICY, the 1.0 default): a repeated name
+  -- (caseless) is a malformed query string and is rejected with 400
+  -- before the rexxlet runs.
+  r = self~httpGet(self~url("multi?a=1&b=2&a=3"))
+  self~assertEquals("400", r~entry("status"), -
+    "GET args: duplicate name rejected with 400 under strict policy")
+
+::Method test_get_arg_urldecoding
+  r = self~httpGet(self~url("multi?c=hello%20world"))
+  self~assertContains(r~entry("body"), "c=hello world", -
+    "GET args: percent-encoding decoded (%20 -> space)")
+
+::Method test_get_arg_plus_decoding
+  r = self~httpGet(self~url("multi?c=a+b"))
+  self~assertContains(r~entry("body"), "c=a b", -
+    "GET args: plus decoded to space")
+
+/******************************************************************************/
+/* Named argument lookup and Exists option.                                   */
+/******************************************************************************/
+
+::Method test_named_arg_value
+  r = self~httpGet(self~url("qs?q=hello&z=9"))
+  self~assertContains(r~entry("body"), "q=hello", -
+    "named arg lookup returns the value")
+
+::Method test_named_arg_exists_true
+  r = self~httpGet(self~url("qs?q=hello"))
+  self~assertContains(r~entry("body"), "exists=1", -
+    "named arg Exists is 1 for a present arg")
+
+::Method test_named_arg_exists_false
+  r = self~httpGet(self~url("qs?q=hello"))
+  self~assertContains(r~entry("body"), "missing_exists=0", -
+    "named arg Exists is 0 for an absent arg")
+
+/******************************************************************************/
+/* arg()/cookie() option validation, unified (ref-decisiones.md, this v):      */
+/* both look only at the option's first letter, matching the ARG() BIF        */
+/* convention exactly (Arg(n,"Nonsense") silently resolves as Normal) -- so    */
+/* "Nonsense" is accepted as Name, not rejected. Before this fix, cookie()     */
+/* used abbrev() on the full word instead and rejected it; that stricter      */
+/* check is gone now that cookie() follows the same rule as arg(). A letter   */
+/* matching neither N/V/E/O must still fail, with a well-formed three-        */
+/* argument 93.914 (cookie()'s old two-argument call corrupted the message).  */
+/******************************************************************************/
+
+::Method test_arg_option_first_letter_accepted
+  r = self~httpGetCookie(self~url("argopt?who=jmb"), "session=abc123")
+  self~assertContains(r~entry("body"), "arg_nonsense_as_name=[who]", -
+    'arg("who","Nonsense") resolves as Name (first letter N), not rejected')
+
+::Method test_cookie_option_first_letter_accepted
+  r = self~httpGetCookie(self~url("argopt?who=jmb"), "session=abc123")
+  self~assertContains(r~entry("body"), "cookie_nonsense_as_name=[session]", -
+    'cookie("session","Nonsense") resolves as Name (first letter N), not rejected')
+
+::Method test_arg_option_bad_letter_rejected
+  r = self~httpGetCookie(self~url("argopt?who=jmb"), "session=abc123")
+  self~assertContains(r~entry("body"), -
+    'arg_bad_letter=[93.914|Method argument 2 must be one of NVEO; found "Z".]', -
+    "arg() rejects a first letter outside NVEO with a well-formed 93.914")
+
+::Method test_cookie_option_bad_letter_rejected
+  r = self~httpGetCookie(self~url("argopt?who=jmb"), "session=abc123")
+  self~assertContains(r~entry("body"), -
+    'cookie_bad_letter=[93.914|Method argument 2 must be one of NVEO; found "Z".]', -
+    "cookie() rejects a first letter outside NVEO with the SAME well-formed" -
+    "93.914 arg() uses -- the old two-argument call is gone")
+
+/******************************************************************************/
+/* POST arguments: parsed from the request body.                              */
+/******************************************************************************/
+
+::Method test_post_arg_count
+  r = self~httpPost(self~url("multi"), "x=10&y=20")
+  self~assertContains(r~entry("body"), "count=2", -
+    "POST args: two arguments counted")
+
+::Method test_post_arg_value
+  r = self~httpPost(self~url("multi"), "x=10&y=20")
+  self~assertContains(r~entry("body"), "1: x=10", -
+    "POST args: first arg parsed from body")
+
+::Method test_post_method_seen
+  -- check reports the method but does not read args. Before the stdin-drain
+  -- fix this POST stalled (unconsumed body); now it completes cleanly.
+  r = self~httpPost(self~url("check"), "x=1")
+  self~assertContains(r~entry("body"), "method=POST", -
+    "POST: request~method reports POST")
+
+::Method test_post_unconsumed_body_completes
+  -- Regression test for the stdin drain: a POST with a body to a rexxlet
+  -- that never reads its args must still return a complete response. hola
+  -- ignores the body entirely.
+  r = self~httpPost(self~url("hola"), "ignored=payload")
+  self~assertContains(r~entry("body"), "Hola, mundo", -
+    "POST body left unread still yields a complete response (stdin drained)")
+
+::Method test_post_unconsumed_body_status
+  r = self~httpPost(self~url("hola"), "ignored=payload")
+  self~assertEquals("200", r~entry("status"), -
+    "POST with unconsumed body returns 200")
+
+/******************************************************************************/
+/* POST body, chunked transfer-encoding (v99).                                */
+/* A chunked POST arrives with CONTENT_LENGTH empty; Apache unwraps the       */
+/* chunks and hands the reassembled body on stdin, and process_args reads it  */
+/* to EOF instead of the old CharIn(,,"") that raised 40.12 -> 500.            */
+/* See design-post-body-reading.md and ref-decisiones.md (v99).               */
+/******************************************************************************/
+
+::Method test_post_chunked_arg_count
+  -- Before v99 this exact request was a 500 (Error 40.12 on CharIn(,,"")).
+  r = self~httpPostChunked(self~url("chunkecho"), "x=10&y=20")
+  self~assertContains(r~entry("body"), "count=2", -
+    "chunked POST: two arguments parsed from the EOF-read body")
+
+::Method test_post_chunked_arg_values
+  -- Proves the body was reassembled in order, not just non-empty.
+  r = self~httpPostChunked(self~url("chunkecho"), "x=10&y=20")
+  self~assertContains(r~entry("body"), "1: x=10", -
+    "chunked POST: first arg parsed in order")
+
+::Method test_post_chunked_status
+  r = self~httpPostChunked(self~url("chunkecho"), "x=10&y=20")
+  self~assertEquals("200", r~entry("status"), -
+    "chunked POST returns 200, not the old 500")
+
+::Method test_post_chunked_discriminator
+  -- The new transfer_encoding attribute is what tells process_args to read
+  -- to EOF. The fixture echoes it so the discriminator is under test too.
+  r = self~httpPostChunked(self~url("chunkecho"), "x=1")
+  self~assertContains(r~entry("body"), "transfer_encoding=chunked", -
+    "chunked POST: transfer_encoding attribute reports chunked")
+
+::Method test_post_chunked_empty_body
+  -- Empty chunked body (just the terminating zero chunk): the EOF loop must
+  -- return "" cleanly -- no hang, no error, zero args.
+  r = self~httpPostChunked(self~url("chunkecho"), "")
+  self~assertContains(r~entry("body"), "count=0", -
+    "empty chunked POST yields zero args without error")
+
+::Method test_post_chunked_empty_status
+  r = self~httpPostChunked(self~url("chunkecho"), "")
+  self~assertEquals("200", r~entry("status"), -
+    "empty chunked POST returns 200")
+
+::Method test_post_contentlength_still_fast_path
+  -- Control: a normal Content-Length POST must be untouched -- transfer_encoding
+  -- empty, args parsed by the original fast path.
+  r = self~httpPost(self~url("chunkecho"), "x=10&y=20")
+  self~assertContains(r~entry("body"), "count=2", -
+    "Content-Length POST keeps the fast path: args parsed, no chunked read")
+
+::Method test_post_contentlength_te_empty
+  r = self~httpPost(self~url("chunkecho"), "x=10&y=20")
+  self~assertContains(r~entry("body"), "transfer_encoding="||"0a"x, -
+    "Content-Length POST reports empty transfer_encoding")
+
+/******************************************************************************/
+/* PUT and DELETE (v99, Diseno 2).                                            */
+/* PUT/DELETE are supported: their body is drained (so Apache never stalls    */
+/* on an unread body), but their ARGUMENTS come from the query string, like   */
+/* GET -- not from the body. The raw body stays available in ~post_string for */
+/* the rexxlet to interpret (it may be JSON or binary; there is no universal  */
+/* convention that a PUT/DELETE body is form-urlencoded). See ref-decisiones  */
+/* "v99 -- PUT/DELETE".                                                       */
+/******************************************************************************/
+
+::Method test_put_status_ok
+  -- A PUT with a body to an arg-reading rexlet used to STALL (unread body).
+  r = self~httpVerb("PUT", self~url("methodbody?q=1"), "b=body")
+  self~assertEquals("200", r~entry("status"), -
+    "PUT with a body no longer stalls; returns 200")
+
+::Method test_put_args_from_query
+  r = self~httpVerb("PUT", self~url("methodbody?q=query1&r=query2"), "b=body1&c=body2")
+  self~assertContains(r~entry("body"), "1: q=query1", -
+    "PUT: arguments are parsed from the query string, not the body")
+
+::Method test_put_body_raw_in_post_string
+  r = self~httpVerb("PUT", self~url("methodbody?q=1"), "b=body1&c=body2")
+  self~assertContains(r~entry("body"), "body=[b=body1&c=body2]", -
+    "PUT: the raw body is left untouched in ~post_string")
+
+::Method test_put_body_not_parsed_as_args
+  -- The body pairs must NOT appear as arguments: only the query does.
+  r = self~httpVerb("PUT", self~url("methodbody?q=1"), "b=body1&c=body2")
+  self~assertContains(r~entry("body"), "argcount=1", -
+    "PUT: the body is not parsed as arguments (only the query is)")
+
+::Method test_put_json_body_no_400
+  -- A non-form body (JSON) must not trip the strict arg policy, because the
+  -- body is never parsed as args. Under a body-parsing design this would 400.
+  r = self~httpVerb("PUT", self~url("methodbody?id=7"), "{" || '"n":5' || "}")
+  self~assertEquals("200", r~entry("status"), -
+    "PUT with a JSON body returns 200 (body not parsed as form args)")
+
+::Method test_delete_status_ok
+  r = self~httpVerb("DELETE", self~url("methodbody?id=9"), "d=1")
+  self~assertEquals("200", r~entry("status"), -
+    "DELETE with a body returns 200, no stall")
+
+::Method test_delete_args_from_query
+  r = self~httpVerb("DELETE", self~url("methodbody?id=9"), "d=body")
+  self~assertContains(r~entry("body"), "1: id=9", -
+    "DELETE: arguments come from the query string")
+
+::Method test_delete_body_raw
+  r = self~httpVerb("DELETE", self~url("methodbody?id=9"), "d=payload")
+  self~assertContains(r~entry("body"), "body=[d=payload]", -
+    "DELETE: the raw body is preserved in ~post_string")
+
+::Method test_put_bodiless
+  -- A bodiless PUT: args from query, empty body, no stall.
+  r = self~httpVerb("PUT", self~url("methodbody?q=only"))
+  self~assertContains(r~entry("body"), "body=[]", -
+    "bodiless PUT: empty post_string, args still from query")
+
+::Method test_put_method_reported
+  r = self~httpVerb("PUT", self~url("methodbody?q=1"), "b=1")
+  self~assertContains(r~entry("body"), "method=PUT", -
+    "PUT: request~method reports PUT")
+
+
+/******************************************************************************/
+/* HEAD contract (v104). Two distinct facts, kept apart on purpose:           */
+/*                                                                            */
+/*  1. The DEFAULT: a rexxlet that does NOT branch on the method runs its     */
+/*     whole body under HEAD; Apache strips the body on the way out. The      */
+/*     rexxlet sees method=HEAD and its query string, exactly as GET. This is */
+/*     correct and must not regress -- production leans on it. (check.)       */
+/*                                                                            */
+/*  2. The OPTIMISED wrapper (headwrap): a rexxlet that DOES know its answer  */
+/*     ahead of the body can branch on HEAD, do its housekeeping, set headers */
+/*     from the file's stat, and skip the body read. Headers present, body    */
+/*     empty, query string passed through. Content-Length is NOT asserted on  */
+/*     the HEAD here: Apache manages it for CGI and drops the script's value  */
+/*     when there is no body to measure (verified in vivo, v104).             */
+/******************************************************************************/
+
+::Method test_head_default_body_stripped
+  -- HEAD on a plain rexxlet: Apache strips the body. The client sees none.
+  r = self~httpHead(self~url("check?q=1"))
+  self~assertTrue(r~entry("body")~strip == "", -
+    "HEAD default: response body is empty (Apache strips it)")
+
+::Method test_head_default_status_ok
+  r = self~httpHead(self~url("check?q=1"))
+  self~assertEquals("200", r~entry("status"), -
+    "HEAD default: 200, the rexxlet ran to completion")
+
+::Method test_head_default_content_type
+  -- The rexxlet set Content-Type; HEAD must carry the same header a GET would.
+  r = self~httpHead(self~url("check?q=1"))
+  self~assertHeader(r~entry("headers"), "Content-Type", "text/plain", -
+    "HEAD default: Content-Type header present, as on GET")
+
+::Method test_head_wrapper_no_body
+  -- The wrapper branches on HEAD and returns before reading the file.
+  r = self~httpHead(self~url("headwrap?q=alpha"))
+  self~assertTrue(r~entry("body")~strip == "", -
+    "HEAD wrapper: no body emitted (Return before the file read)")
+
+::Method test_head_wrapper_housekeeping_ran
+  -- The side work must still happen under HEAD: the marker header proves it.
+  r = self~httpHead(self~url("headwrap?q=alpha"))
+  self~assertHeader(r~entry("headers"), "X-Housekeeping", "done", -
+    "HEAD wrapper: housekeeping ran (HEAD is not a no-op)")
+
+::Method test_head_wrapper_query_passed
+  -- The query string reaches the rexxlet under HEAD, same as GET.
+  r = self~httpHead(self~url("headwrap?q=alpha"))
+  self~assertHeader(r~entry("headers"), "X-Query", "q=alpha", -
+    "HEAD wrapper: query string passed through under HEAD")
+
+::Method test_head_wrapper_get_has_body
+  -- Control: the SAME wrapper under GET does deliver the fixed file, so the
+  -- HEAD emptiness above is the branch firing, not a broken servlet.
+  r = self~httpGet(self~url("headwrap?q=alpha"))
+  self~assertContains(r~entry("body"), "FIXED PAYLOAD LINE 1", -
+    "GET wrapper: the fixed file is delivered in full")
+
+
+
+/******************************************************************************/
+/* Request properties: method, script_name, uri.                             */
+/******************************************************************************/
+
+::Method test_check_method_get
+  r = self~httpGet(self~url("check"))
+  self~assertContains(r~entry("body"), "method=GET", -
+    "check: GET method reported")
+
+::Method test_check_script_name
+  r = self~httpGet(self~url("check?foo=bar"))
+  self~assertContains(r~entry("body"), "script_name=/test/check", -
+    "check: script_name computed without query string")
+
+::Method test_check_uri
+  r = self~httpGet(self~url("check?foo=bar"))
+  self~assertContains(r~entry("body"), "uri=/test/check", -
+    "check: uri excludes the query string")
+
+::Method test_uri_literal_plus_preserved
+  -- v99: ~uri decodes REQUEST_URI as a PATH (decodeURIComponent), so a literal
+  -- "+" survives. The old decodeForm turned /c++.md into /c  .md.
+  r = self~httpGet(self~url("check/c++.md"))
+  self~assertContains(r~entry("body"), "uri=/test/check/c++.md", -
+    "uri: a literal + in the path is preserved, not turned into spaces")
+
+::Method test_uri_percent2B_decodes_to_plus
+  -- %2B must still decode to a literal + (both decoders agree here).
+  r = self~httpGet(self~url("check/c%2B%2B.md"))
+  self~assertContains(r~entry("body"), "uri=/test/check/c++.md", -
+    "uri: %2B in the path decodes to a literal +")
+
+::Method test_uri_percent20_decodes_to_space
+  -- %20 must still decode to a space -- the fix removes the + rule, not %xx.
+  r = self~httpGet(self~url("check/a%20b.md"))
+  self~assertContains(r~entry("body"), "uri=/test/check/a b.md", -
+    "uri: %20 in the path still decodes to a space")
+
+::Method test_query_arg_plus_still_space
+  -- Regression guard: the query string genuinely IS form data, so + must
+  -- still mean space in a query ARGUMENT. The fix only touched the path.
+  r = self~httpGet(self~url("qs?q=a+b"))
+  self~assertContains(r~entry("body"), "q=a b", -
+    "query argument: + still decodes to a space (form semantics intact)")
+
+
+/******************************************************************************/
+/* Cookies: setting, attributes, round-trip, strict guard.                    */
+/******************************************************************************/
+
+::Method test_setck_header
+  r = self~httpGet(self~url("setck"))
+  self~assertHeader(r~entry("headers"), "Set-Cookie", "session=abc123", -
+    "setck emits Set-Cookie for the session cookie")
+
+::Method test_setck_path
+  r = self~httpGet(self~url("setck"))
+  self~assertHeader(r~entry("headers"), "Set-Cookie", "Path=/", -
+    "setck emits Path=/ on the cookie")
+
+::Method test_setckopts_attributes
+  -- Max-Age, SameSite and HttpOnly all present on one Set-Cookie line.
+  r = self~httpGet(self~url("setckopts"))
+  self~assertHeader(r~entry("headers"), "Set-Cookie", "Max-Age=3600", -
+    "setckopts emits Max-Age")
+
+::Method test_setckopts_samesite
+  r = self~httpGet(self~url("setckopts"))
+  self~assertHeader(r~entry("headers"), "Set-Cookie", "SameSite=Lax", -
+    "setckopts emits SameSite=Lax")
+
+::Method test_setckopts_httponly
+  r = self~httpGet(self~url("setckopts"))
+  self~assertHeader(r~entry("headers"), "Set-Cookie", "HttpOnly", -
+    "setckopts emits HttpOnly")
+
+::Method test_cookie_roundtrip
+  -- setck sets the cookie into a fresh jar; readck must read it back.
+  jar = self~newJar("rexxhttp-roundtrip.jar")
+  self~httpGet(self~url("setck"), jar)
+  r = self~httpGet(self~url("readck"), jar)
+  self~dropJar(jar)
+  self~assertContains(r~entry("body"), "session=abc123", -
+    "cookie round-trip: readck reads back the value setck wrote")
+
+::Method test_cookie_roundtrip_count
+  jar = self~newJar("rexxhttp-roundtrip2.jar")
+  self~httpGet(self~url("setck"), jar)
+  r = self~httpGet(self~url("readck"), jar)
+  self~dropJar(jar)
+  self~assertContains(r~entry("body"), "count=1", -
+    "cookie round-trip: exactly one cookie seen by readck")
+
+::Method test_cookie_pair_count
+  -- Browsers send several cookies as "a=1; b=2" — separator "; " per
+  -- RFC 6265. Both must be parsed (regression: split on ";" alone left
+  -- a leading space in the second name).
+  jar = self~newJar("rexxhttp-pair1.jar")
+  self~httpGet(self~url("setpair"), jar)
+  r = self~httpGet(self~url("readpair?x=1"), jar)
+  self~dropJar(jar)
+  self~assertContains(r~entry("body"), "count=2", -
+    "cookie pair: both cookies of a browser-style Cookie header parsed")
+
+::Method test_cookie_pair_first_by_name
+  jar = self~newJar("rexxhttp-pair2.jar")
+  self~httpGet(self~url("setpair"), jar)
+  r = self~httpGet(self~url("readpair?x=1"), jar)
+  self~dropJar(jar)
+  self~assertContains(r~entry("body"), "first=plain", -
+    "cookie pair: the first cookie is reachable by name")
+
+::Method test_cookie_pair_second_by_name
+  -- The second cookie must be reachable by name (no leading space), and
+  -- its caller-encoded value must come back decoded: %3B as ";" without
+  -- acting as a separator, %2B as "+" (percent-only decoding; the "+"
+  -- rule belongs to form-urlencoded data, not to cookies).
+  jar = self~newJar("rexxhttp-pair3.jar")
+  self~httpGet(self~url("setpair"), jar)
+  r = self~httpGet(self~url("readpair?x=1"), jar)
+  self~dropJar(jar)
+  self~assertContains(r~entry("body"), "second=a;b+c", -
+    "cookie pair: second cookie reachable by name, value percent-decoded")
+
+::Method test_zero_arg_not_reported
+  -- The argument counter no longer lives in the stem key space: with
+  -- arguments present, arg("0","Exists") must be 0 (it used to find the
+  -- counter and report an inexistent parameter named "0").
+  jar = self~newJar("rexxhttp-pair4.jar")
+  self~httpGet(self~url("setpair"), jar)
+  r = self~httpGet(self~url("readpair?x=1"), jar)
+  self~dropJar(jar)
+  self~assertContains(r~entry("body"), "zeroarg=0", -
+    "no parameter named 0 is reported when arguments are present")
+
+::Method test_zero_cookie_not_reported
+  -- Same for cookies: with cookies present and none named "0",
+  -- cookie("0","Exists") must be 0.
+  jar = self~newJar("rexxhttp-pair5.jar")
+  self~httpGet(self~url("setpair"), jar)
+  r = self~httpGet(self~url("readpair?x=1"), jar)
+  self~dropJar(jar)
+  self~assertContains(r~entry("body"), "zerocookie=0", -
+    "no cookie named 0 is reported when cookies are present")
+
+::Method test_badck_renders_error_page
+  -- An inconsistent cookie (SameSite=None without Secure) now raises inside
+  -- the rexxlet, at addcookie time, so RexxHTTP's own error page renders
+  -- rather than Apache's bare 500.
+  r = self~httpGet(self~url("badck"))
+  self~assertContains(r~entry("body"), "Internal server error", -
+    "badck renders the RexxHTTP error page")
+
+::Method test_badck_error_message
+  r = self~httpGet(self~url("badck"))
+  self~assertContains(r~entry("body"), "SameSite=None requires Secure", -
+    "badck error page names the strict-guard violation")
+
+::Method test_badck_traceback_in_addcookie
+  -- The traceback must show the failure surfacing at addcookie, confirming
+  -- the validation now happens inside the rexxlet, not at commit.
+  r = self~httpGet(self~url("badck"))
+  self~assertContains(r~entry("body"), "addcookie", -
+    "badck traceback surfaces through addcookie")
+
+/******************************************************************************/
+/* Cookie name validation: a non-ASCII byte in the name is rejected at new.   */
+/******************************************************************************/
+
+::Method test_badnm_nonascii_name_rejected
+  -- validatename rejects bytes outside ASCII (v9): RFC 6265 limits the
+  -- cookie-name to token characters. The fixture builds "caf"||"e9"x in
+  -- code; new must raise, and the error page must name the violation.
+  r = self~httpGet(self~url("badnm"))
+  self~assertContains(r~entry("body"), "non-ASCII character", -
+    "badnm error page names the non-ASCII cookie-name rejection")
+
+/******************************************************************************/
+/* Cookie name validation: a backslash is an RFC 6265 separator. Before v107  */
+/* validatename omitted it (audit §3.10) and a name like "bad\name" slipped   */
+/* through -- a header-injection surface. new must now reject it, and no      */
+/* Set-Cookie carrying the name may reach the client.                         */
+/******************************************************************************/
+
+::Method test_bsnm_backslash_name_rejected
+  r = self~httpGet(self~url("bsnm"))
+  self~assertContains(r~entry("body"), "forbidden character '\'", -
+    "bsnm error page names the backslash as a forbidden cookie-name character")
+
+::Method test_bsnm_backslash_name_no_injection
+  r = self~httpGet(self~url("bsnm"))
+  self~assertNotContains(r~entry("headers"), "Set-Cookie: bad", -
+    "the rejected cookie name never reaches the client as a Set-Cookie header")
+
+/******************************************************************************/
+/* arrayout: restored in v9 (its Arg indices were shifted; no call could      */
+/* ever succeed). In LINES mode every element -- INCLUDING the last -- is      */
+/* terminated by LF (ref-decisiones.md v106). The class supplies the LF by     */
+/* hand (its own eol, the HTTP body convention) instead of makeString's        */
+/* platform-dependent .endOfLine default, so the last-line terminator is       */
+/* present and deterministic. This deliberately drops byte-parity with         */
+/* .Stream~arrayout on platforms where .endOfLine is not LF.                   */
+/******************************************************************************/
+
+::Method test_arrout_joins_and_terminates_with_lf
+  r = self~httpGet(self~url("arrout"))
+  -- Elements present and separated by LF. NB: the test harness's slurp() reads
+  -- the body line by line and rejoins WITHOUT a trailing terminator, so
+  -- entry("body") cannot see the last LF -- assert only the inter-element joins
+  -- here, and check the final terminator via Content-Length below.
+  self~assertContains(r~entry("body"), "alpha"||"0A"x||"beta"||"0A"x||"gamma", -
+    "arrayout writes the array elements joined by LF")
+  -- The terminator IS on the wire: body is "alpha\nbeta\ngamma\n" = 17 bytes.
+  -- Without the v106 final terminator it would be 16. Content-Length is the
+  -- byte-accurate channel (slurp would hide the difference).
+  self~assertHeader(r~entry("headers"), "Content-Length", "17", -
+    "arrayout terminates the last line with LF: body is 17 bytes, not 16" -
+    "(deliberate LF-not-CRLF; converges with Stream~arrayout on LF platforms)")
+
+/******************************************************************************/
+/* arrayout option validation, unified with arg()/cookie() (ref-decisiones.md, */
+/* this v): first letter only, same rule as the ARG() BIF -- "LINEAS" (not a   */
+/* prefix of "LINES") is now accepted, where the old abbrev()-on-full-word     */
+/* check used to reject it. A letter matching neither L nor C must still      */
+/* fail, with a well-formed three-argument 93.914 (the old two-argument call   */
+/* corrupted the message, putting the word list where the argnum belongs).    */
+/******************************************************************************/
+
+::Method test_arrayout_option_first_letter_accepted
+  r = self~httpGet(self~url("arroutopt"))
+  self~assertContains(r~entry("body"), "lineas_accepted=[ok]", -
+    'arrayout(arr,"LINEAS") resolves as LINES (first letter L), not rejected')
+
+::Method test_arrayout_option_bad_letter_rejected
+  r = self~httpGet(self~url("arroutopt"))
+  self~assertContains(r~entry("body"), -
+    'arrayout_bad_letter=[93.914|Method argument 2 must be one of LC; found "X".]', -
+    "arrayout rejects a first letter outside LC with a well-formed 93.914," -
+    "matching the same message shape as arg()/cookie()")
+
+/******************************************************************************/
+/* Lazy headers: a header set AFTER body was written still appears.           */
+/******************************************************************************/
+
+::Method test_late_header_present
+  r = self~httpGet(self~url("late"))
+  self~assertHeader(r~entry("headers"), "X-Late-Header", "yes", -
+    "lazy headers: header set after body output is still emitted")
+
+::Method test_late_body_complete
+  r = self~httpGet(self~url("late"))
+  self~assertContains(r~entry("body"), "body second line", -
+    "lazy headers: full body delivered")
+
+/******************************************************************************/
+/* Partial flush: an explicit early flush still yields the complete body.     */
+/******************************************************************************/
+
+::Method test_partial_flush_full_body
+  r = self~httpGet(self~url("partial"))
+  self~assertContains(r~entry("body"), "after flush", -
+    "partial flush: body after an explicit flush is delivered")
+
+::Method test_partial_flush_status
+  r = self~httpGet(self~url("partial"))
+  self~assertEquals("200", r~entry("status"), -
+    "partial flush: response is 200")
+
+/******************************************************************************/
+/* Error page (runtime error inside a rexxlet): boom.                         */
+/******************************************************************************/
+
+::Method test_boom_error_page
+  r = self~httpGet(self~url("boom"))
+  self~assertContains(r~entry("body"), "Internal server error", -
+    "boom renders the RexxHTTP error page")
+
+::Method test_boom_sanitised_path
+  -- The error page trims DOCUMENT_ROOT from the program path (v4): the
+  -- rexxlet shows as /test/boom, not the full filesystem path.
+  r = self~httpGet(self~url("boom"))
+  self~assertContains(r~entry("body"), "/test/boom", -
+    "boom error page shows the DOCUMENT_ROOT-relative path")
+
+/******************************************************************************/
+/* Argument policy (REXXHTTP_ARGPOLICY). strict is the 1.0 default and only   */
+/* recognised value. Malformed query strings are rejected with 400 before the */
+/* rexxlet runs; an unknown policy value is a 500 config error. The qs fixture */
+/* runs under the default (no SetEnv); polstrict/polbad carry a SetEnv block.  */
+/******************************************************************************/
+
+::Method test_policy_valid_passes
+  r = self~httpGet(self~url("qs?q=hello&z=9"))
+  self~assertEquals("200", r~entry("status"), -
+    "strict: a well-formed query string is accepted")
+
+::Method test_policy_duplicate_rejected
+  r = self~httpGet(self~url("qs?a=1&a=2"))
+  self~assertEquals("400", r~entry("status"), -
+    "strict: a repeated name is rejected with 400")
+
+::Method test_policy_duplicate_caseless
+  -- X and x are the same name in Rexx; a caseless collision is a duplicate.
+  r = self~httpGet(self~url("qs?X=1&x=2"))
+  self~assertEquals("400", r~entry("status"), -
+    "strict: duplicate detection is caseless (X == x)")
+
+::Method test_policy_duplicate_reason
+  r = self~httpGet(self~url("qs?a=1&a=2"))
+  self~assertContains(r~entry("body"), "duplicate parameter name", -
+    "strict: the 400 body states the reason (duplicate)")
+
+::Method test_policy_novalue_rejected
+  r = self~httpGet(self~url("qs?debug"))
+  self~assertEquals("400", r~entry("status"), -
+    "strict: a parameter without = is rejected with 400")
+
+::Method test_policy_novalue_reason
+  r = self~httpGet(self~url("qs?debug"))
+  self~assertContains(r~entry("body"), "without a value", -
+    "strict: the 400 body states the reason (no value)")
+
+::Method test_policy_emptyname_rejected
+  r = self~httpGet(self~url("qs?=v"))
+  self~assertEquals("400", r~entry("status"), -
+    "strict: a parameter with an empty name is rejected with 400")
+
+::Method test_policy_digitname_rejected
+  -- A name beginning with a digit is rejected (the Rexx symbol
+  -- convention; a numeric name would be unreachable through arg anyway).
+  -- 9lives, not 0: the old code also rejected ?0=x, but with a false
+  -- "duplicate" reason (the counter collision), so 0 would be vacuous.
+  r = self~httpGet(self~url("qs?9lives=2"))
+  self~assertEquals("400", r~entry("status"), -
+    "strict: a name beginning with a digit is rejected with 400")
+
+::Method test_policy_digitname_reason
+  -- 0=x pins the honest reason for the name that used to be misreported
+  -- as a duplicate.
+  r = self~httpGet(self~url("qs?0=x"))
+  self~assertContains(r~entry("body"), "begins with a digit", -
+    "strict: the 400 body states the reason (digit-initial name)")
+
+::Method test_policy_digit_inside_name_ok
+  -- Digits are legal anywhere but first.
+  r = self~httpGet(self~url("qs?a9=1"))
+  self~assertEquals("200", r~entry("status"), -
+    "strict: a digit inside a name is accepted")
+
+::Method test_policy_empty_value_ok
+  -- k= is a legitimate empty value, NOT a violation.
+  r = self~httpGet(self~url("qs?q="))
+  self~assertEquals("200", r~entry("status"), -
+    "strict: an explicit empty value (k=) is accepted")
+
+::Method test_policy_trailing_amp_ok
+  -- A trailing or doubled & yields empty tokens, which are ignored.
+  r = self~httpGet(self~url("qs?q=1&"))
+  self~assertEquals("200", r~entry("status"), -
+    "strict: a trailing ampersand is ignored, not rejected")
+
+::Method test_policy_setenv_strict_honoured
+  -- polstrict carries SetEnv REXXHTTP_ARGPOLICY Strict (caseless). The
+  -- value must reach the rexxlet through the Action sub-request, so a
+  -- duplicate is still rejected.
+  r = self~httpGet(self~url("polstrict?a=1&a=2"))
+  self~assertEquals("400", r~entry("status"), -
+    "SetEnv strict reaches the rexxlet (via REDIRECT_) and is honoured")
+
+::Method test_policy_setenv_bad_is_500
+  -- polbad carries SetEnv REXXHTTP_ARGPOLICY disparate: an unknown value
+  -- is an operator misconfiguration, reported as 500 (not 400).
+  r = self~httpGet(self~url("polbad?q=hello"))
+  self~assertEquals("500", r~entry("status"), -
+    "an unknown REXXHTTP_ARGPOLICY value yields a 500 config error")
+
+::Method test_policy_post_duplicate_rejected
+  -- The policy applies to POST bodies too, not just GET query strings.
+  r = self~httpPost(self~url("qs"), "a=1&a=2")
+  self~assertEquals("400", r~entry("status"), -
+    "strict: a duplicate in a POST body is also rejected with 400")
+
+/******************************************************************************/
+/* 404: a direct call to the processor, and a nonexistent rexxlet.            */
+/******************************************************************************/
+
+/******************************************************************************/
+/* Note on the direct-call 404                                                */
+/* --------------------------                                                 */
+/* RexxHTTP.rex guards against being run as a rexxlet itself (Direct() -> a   */
+/* 404). In this montage the Action points straight at the LF processor, so a */
+/* direct URL hit on /RexxHTTP/RexxHTTP.rex runs it as a plain CGI under the   */
+/* ScriptAlias: REDIRECT_HANDLER is empty, Direct() is true, and the guard    */
+/* emits its own "Status: 404" page. That page is deliberately byte-shaped    */
+/* like Apache's stock 404, so the tests below assert on the status, not the  */
+/* body. The guard is exercised directly (test_direct_invocation_404), and    */
+/* the companion tests pin the v99 regression: a valid rexxlet whose query    */
+/* string merely mentions the processor name must still be served, not 404ed. */
+/******************************************************************************/
+
+/******************************************************************************/
+/* v11: argument NAME decoding, and cookie first-wins by name.                */
+/******************************************************************************/
+
+::Method test_arg_name_percent_decoded
+  -- The argument NAME is now decoded with the same DeWeb as the value
+  -- (v11). A field "user name" sent as user%20name resolves through
+  -- arg("user name"); before, the raw "user%20name" was stored and the
+  -- lookup never matched.
+  r = self~httpGet(self~url("readname?user%20name=PCT"))
+  self~assertContains(r~entry("body"), "spaced=[PCT]", -
+    "arg name: %20 in the name is decoded, arg('user name') matches")
+
+::Method test_arg_name_plus_decoded
+  -- A browser submits the field "user name" as user+name. The "+" in
+  -- the name must decode to a space too (form-urlencoded applies to
+  -- both sides of the pair), so arg("user name") matches this as well.
+  r = self~httpGet(self~url("readname?user+name=PLUS"))
+  self~assertContains(r~entry("body"), "spaced=[PLUS]", -
+    "arg name: + in the name decodes to space (form-urlencoded)")
+
+::Method test_arg_name_decode_collision_rejected
+  -- Two encodings of the same decoded name collide after decoding and
+  -- are a genuine duplicate: user%20name and user+name both become
+  -- "user name". Strict rejects with 400 (validation runs on the
+  -- DECODED name).
+  r = self~httpGet(self~url("readname?user%20name=A&user+name=B"))
+  self~assertEquals("400", r~entry("status"), -
+    "arg name: two encodings of one name collide after decode -> 400")
+
+::Method test_arg_name_decode_collision_reason
+  -- The 400 names the DECODED duplicate, not the raw wire form.
+  r = self~httpGet(self~url("readname?user%20name=A&user+name=B"))
+  self~assertContains(r~entry("body"), "duplicate parameter name: user name", -
+    "arg name: the collision 400 reports the decoded name")
+
+::Method test_arg_name_digit_after_decode_rejected
+  -- digitname is checked on the decoded name: %32abc decodes to 2abc,
+  -- which begins with a digit and must be rejected. (Proves validation
+  -- happens AFTER decoding, not before.)
+  r = self~httpGet(self~url("qs?%32abc=1"))
+  self~assertContains(r~entry("body"), "begins with a digit: 2abc", -
+    "arg name: digitname is judged on the decoded name (2abc)")
+
+::Method test_cookie_duplicate_first_wins
+  -- Two cookies of the same name in one Cookie header: the by-name
+  -- lookup resolves to the FIRST sent (v11 first-wins; the browser
+  -- sends the most specific path first, and server practice keeps it).
+  r = self~httpGetCookie(self~url("dupck"), "dup=ONE; dup=TWO")
+  self~assertContains(r~entry("body"), "dup=[ONE]", -
+    "cookie dup: by-name lookup resolves to the first cookie sent")
+
+/******************************************************************************/
+/* Response error() and redirect() -- status-code exits (v12).                */
+/* error() sets a status and emits an HTML5 error page; redirect() sets a     */
+/* 3xx status and a Location. Both honour the commit discipline: a buffered   */
+/* body written before the call is discarded (reset); after a flush they      */
+/* raise instead (not exercised here -- it trips RexxHTTP's syntax handler,    */
+/* a separate concern). curl does not follow redirects, so the status and     */
+/* Location are observed directly.                                            */
+/******************************************************************************/
+
+::Method test_error_404_status
+  r = self~httpGet(self~url("err404"))
+  self~assertEquals("404", r~entry("status"), -
+    "error(404) returns HTTP 404")
+
+::Method test_error_404_content_type
+  -- error() forces text/html regardless of the default text/plain.
+  r = self~httpGet(self~url("err404"))
+  self~assertHeader(r~entry("headers"), "Content-Type", "text/html", -
+    "error() sets Content-Type to text/html")
+
+::Method test_error_404_body_reason
+  r = self~httpGet(self~url("err404"))
+  self~assertContains(r~entry("body"), "Not Found", -
+    "error(404) page shows the reason phrase Not Found")
+
+::Method test_error_404_body_detail
+  -- Anchor to the <p> wrapper, which only error() emits; a v11 failure
+  -- traceback would echo the detail text from the source line, so the
+  -- bare substring would pass vacuously. The tag makes it non-vacuous.
+  r = self~httpGet(self~url("err404"))
+  self~assertContains(r~entry("body"), "<p>no such resource</p>", -
+    "error(404) page shows the supplied detail in a <p>")
+
+/******************************************************************************/
+/* Direct invocation guard (v99).                                             */
+/* RexxHTTP.rex 404s when hit directly by URL (no document to run), but must  */
+/* NOT 404 a valid rexxlet just because its QUERY STRING mentions the         */
+/* processor's name. The old unanchored substring test on REQUEST_URI did     */
+/* exactly that; the fix keys on REDIRECT_HANDLER (empty only on a direct     */
+/* hit). See ref-decisiones.md "v99 -- Direct()".                             */
+/******************************************************************************/
+
+::Method test_direct_invocation_404
+  -- Hitting the processor directly by its own URL: no rexxlet to dispatch.
+  r = self~httpGet(self~class~baseURL || "/RexxHTTP/RexxHTTP.rex")
+  self~assertEquals("404", r~entry("status"), -
+    "direct URL hit on RexxHTTP.rex returns 404")
+
+::Method test_query_mentions_processor_not_404
+  -- The regression: a valid rexxlet whose query string carries the processor
+  -- name. Before the fix this was a spurious 404.
+  r = self~httpGet(self~url("hola?doc=RexxHTTP.rex"))
+  self~assertEquals("200", r~entry("status"), -
+    "valid rexxlet with RexxHTTP.rex in the query string is served, not 404ed")
+
+::Method test_query_mentions_processor_body_served
+  -- Status alone could be a coincidence; confirm the real rexxlet ran.
+  r = self~httpGet(self~url("hola?doc=RexxHTTP.rex"))
+  self~assertContains(r~entry("body"), "Hola, mundo", -
+    "the rexlet body is served, proving it was dispatched not blocked")
+
+::Method test_query_mentions_processor_caseless_not_404
+  -- The old test was caseless, so a lowercased mention also tripped it.
+  r = self~httpGet(self~url("hola?f=rexxhttp.rex"))
+  self~assertEquals("200", r~entry("status"), -
+    "a lowercased processor name in the query no longer 404s")
+
+::Method test_query_mentions_processor_unanchored_not_404
+  -- And it was unanchored, so a name merely CONTAINING the string tripped it.
+  r = self~httpGet(self~url("hola?f=miRexxHTTP.rexy"))
+  self~assertEquals("200", r~entry("status"), -
+    "an unanchored superstring of the processor name no longer 404s")
+
+::Method test_return_url_query_not_404
+  -- The realistic trigger the audit named: a return-URL parameter that points
+  -- back at the processor. Must be served normally.
+  r = self~httpGet(self~url("hola?return=/RexxHTTP/RexxHTTP.rex"))
+  self~assertEquals("200", r~entry("status"), -
+    "a return-URL query naming the processor path is served, not 404ed")
+
+
+::Method test_error_generic_status
+  -- 503 IS in the table; this checks a known 5xx maps to its reason.
+  r = self~httpGet(self~url("errgen"))
+  self~assertEquals("503", r~entry("status"), -
+    "error(503) returns HTTP 503")
+
+::Method test_error_generic_reason
+  r = self~httpGet(self~url("errgen"))
+  self~assertContains(r~entry("body"), "Service Unavailable", -
+    "error(503) page shows the reason phrase Service Unavailable")
+
+::Method test_error_detail_html_escaped
+  -- A detail containing < > & must be escaped, not emitted as raw markup.
+  r = self~httpGet(self~url("errescape"))
+  self~assertContains(r~entry("body"), "bad &lt;x&gt; &amp; &lt;y&gt;", -
+    "error() HTML-escapes < > & in the detail")
+
+::Method test_error_detail_no_raw_tag
+  -- Belt and braces: the raw "<x>" must NOT survive into the body.
+  r = self~httpGet(self~url("errescape"))
+  self~assertNotContains(r~entry("body"), "<x>", -
+    "error() does not leak a raw < tag from the detail")
+
+::Method test_error_resets_buffered_body
+  -- errreset says VANISH_ME then calls error(403). For a true reset the
+  -- error page must be present (proves error() ran and emitted) AND
+  -- VANISH_ME must be gone (proves the prior buffer was discarded).
+  -- Checking only the absence would pass vacuously against a v11 500,
+  -- whose traceback aborts before the buffer is ever flushed.
+  r = self~httpGet(self~url("errreset"))
+  -- Page present (error() ran) AND prior body gone (buffer discarded).
+  -- The first assert is the non-vacuous anchor; the second rides on it.
+  self~assertContains(r~entry("body"), "<p>denied</p>", -
+    "error() emits its own page after discarding the buffer")
+  self~assertNotContains(r~entry("body"), "VANISH_ME", -
+    "error() discards the body buffered before the call (reset)")
+
+::Method test_error_reset_status
+  r = self~httpGet(self~url("errreset"))
+  self~assertEquals("403", r~entry("status"), -
+    "error(403) after a buffered Say still returns 403")
+
+::Method test_redirect_default_status
+  -- redirect() with no status defaults to 302 Found.
+  r = self~httpGet(self~url("rdr"))
+  self~assertEquals("302", r~entry("status"), -
+    "redirect() defaults to HTTP 302")
+
+::Method test_redirect_default_location
+  r = self~httpGet(self~url("rdr"))
+  self~assertHeader(r~entry("headers"), "Location", "/test/hola", -
+    "redirect() sets the Location header")
+
+::Method test_redirect_301_status
+  -- An explicit permanent redirect (the canonical-slug case).
+  r = self~httpGet(self~url("rdr301"))
+  self~assertEquals("301", r~entry("status"), -
+    "redirect(url, 301) returns HTTP 301")
+
+::Method test_redirect_301_location
+  r = self~httpGet(self~url("rdr301"))
+  self~assertHeader(r~entry("headers"), "Location", "/canonical/slug/", -
+    "redirect(url, 301) sets the Location header")
+
+::Method test_redirect_303_status
+  -- See Other, the Post/Redirect/Get status.
+  r = self~httpGet(self~url("rdr303"))
+  self~assertEquals("303", r~entry("status"), -
+    "redirect(url, 303) returns HTTP 303")
+
+::Method test_redirect_header_pretty_case
+  -- Headers are emitted title-cased (Location, not LOCATION), though stored
+  -- uppercase. assertHeader is caseless, so check the raw block for the form.
+  r = self~httpGet(self~url("rdr301"))
+  self~assertContains(r~entry("headers"), "Location:", -
+    "emitted header is title-cased (Location:, not LOCATION:)")
+
+/******************************************************************************/
+/* Commit discipline: setting a header after the response is committed is a    */
+/* programming error and now raises (fail-fast), unifying with error/redirect. */
+/* The Syntax handler degrades gracefully because it guards on committed.      */
+/******************************************************************************/
+
+::Method test_setheader_after_commit_raises
+  -- commitfail flushes (commits 200), then assigns a header. The new []=
+  -- guard raises 93.900; the handler catches it. Non-vacuous anchor: the
+  -- handler error page text must be present (proves the raise fired and was
+  -- handled). Against a Response where []= stays silent, no raise happens,
+  -- "unreachable" is reached, and this anchor is absent -> the test breaks.
+  r = self~httpGet(self~url("commitfail"))
+  self~assertContains(r~entry("body"), "Internal server error", -
+    "setting a header after commit raises and is handled")
+
+::Method test_setheader_after_commit_no_unreachable
+  -- The raise must abort before the line past the bad assignment runs.
+  r = self~httpGet(self~url("commitfail"))
+  self~assertNotContains(r~entry("body"), "unreachable", -
+    "the raise stops execution at the late header assignment")
+
+::Method test_addcookie_after_commit_raises
+  -- addckfail flushes (commits 200), then calls addcookie. v13 unified the
+  -- header-after-commit fail-fast to addcookie too, so the guard raises
+  -- 93.900 and the handler catches it. Non-vacuous anchor: the handler
+  -- error page text must be present (proves the raise fired). Against a
+  -- Response where addcookie stays silent after commit, no raise happens,
+  -- "unreachable" is reached, and this anchor is absent -> the test breaks.
+  r = self~httpGet(self~url("addckfail"))
+  self~assertContains(r~entry("body"), "Internal server error", -
+    "adding a cookie after commit raises and is handled")
+
+::Method test_addcookie_after_commit_no_unreachable
+  -- The raise must abort before the line past the bad addcookie runs.
+  r = self~httpGet(self~url("addckfail"))
+  self~assertNotContains(r~entry("body"), "unreachable", -
+    "the raise stops execution at the late addcookie")
+
+/******************************************************************************/
+/* Regression guard (NOT a non-vacuity anchor): a crash AFTER an explicit      */
+/* flush must keep the committed 200 and its body. This output is the same in  */
+/* v12 and v13 by design -- the committing flag changed the internal mechanism */
+/* (so []= fail-fast and the handler can coexist) without changing what the    */
+/* client sees. Its job is to catch a future regression when the Syntax        */
+/* handler is reworked, not to detect this change.                             */
+/******************************************************************************/
+
+::Method test_crash_after_flush_keeps_body_and_200
+  -- A crash past an explicit flush: the 200 and the flushed body are already
+  -- on the wire, so the handler must leave them intact (it cannot rewrite
+  -- committed headers). Same observable result in v12 and v13; this is a
+  -- regression guard for the committed path of the handler.
+  r = self~httpGet(self~url("flushcrash"))
+  self~assertContains(r~entry("body"), "FLUSHCRASH_BODY", -
+    "body flushed before the crash is delivered")
+  self~assertEquals("200", r~entry("status"), -
+    "crash after an explicit flush leaves the committed 200 intact")
+
+::Method test_crash_after_flush_reports_error
+  -- The handler still appends its diagnostic even when it cannot change the
+  -- status. Regression guard, not a non-vacuity anchor.
+  r = self~httpGet(self~url("flushcrash"))
+  self~assertContains(r~entry("body"), "Internal server error", -
+    "the handler still reports the error after a committed crash")
+
+/******************************************************************************/
+/* error() double-pop (v97): a rexxlet that calls error()/404() -- which pops  */
+/* .output itself -- and THEN fails must NOT vanish. Before the fix the         */
+/* processor popped .output a second time (it trusted an outputRedirected      */
+/* flag error() could not update), .output fell to .NIL, and the Syntax        */
+/* handler died on its first Say (97.1), so the client got a pristine 404 and   */
+/* the real failure was lost from both the response and error.log. The fix     */
+/* removes the flag: both the normal path and the handler ask the stack        */
+/* itself (.output~current isA HTTP.OutputStream) before popping, so error()'s  */
+/* own pop can never desynchronise anything. Fixture: errthenfail (error(404)   */
+/* then 1/0). The property under test is that the SECOND failure surfaces.      */
+/******************************************************************************/
+
+::Method test_errthenfail_surfaces_error_page
+  -- The decisive assertion: the handler's error page must reach the client,
+  -- naming the real failure. Before the fix this was absent (the handler died
+  -- on .NIL before emitting it) and the client saw only error()'s clean 404.
+  r = self~httpGet(self~url("errthenfail"))
+  self~assertContains(r~entry("body"), "Internal server error", -
+    "a failure after error() surfaces the handler's error page, not a clean 404")
+
+::Method test_errthenfail_names_the_real_failure
+  -- Non-vacuity + the actual point: the division-by-zero must be reported,
+  -- not swallowed. The ooRexx arithmetic error text carries "zero".
+  r = self~httpGet(self~url("errthenfail"))
+  self~assertContains(r~entry("body"), "zero", -
+    "the real (division-by-zero) failure is reported, not lost")
+
+::Method test_errthenfail_no_unreachable
+  -- The failure must abort before the line past 1/0 runs.
+  r = self~httpGet(self~url("errthenfail"))
+  self~assertNotContains(r~entry("body"), "should not reach here", -
+    "execution stops at the failure, not after it")
+
+/******************************************************************************/
+/* CR/LF rejection (v97): a header value, redirect location, or cookie value  */
+/* with an embedded CR/LF now raises at the exact setter that received it     */
+/* ([]=, redirect, HTTP.Cookie~new), rather than being written through.       */
+/* Measured against Apache 2.4.58 real (audit-core-20260725.md sec 2.1): a    */
+/* single CRLF injects a header, a double CRLF closes the header block and   */
+/* lets the attacker supply the body, and a smuggled Content-Type turns that  */
+/* into stored XSS in the app's own origin. Fixtures: crlfhdr ([]=), crlfrdr  */
+/* (redirect, the worst-case double-CRLF + Content-Type escalation), crlfck   */
+/* (cookie value). Origin-level checks (JMB, v97): the traceback must point   */
+/* at the offending call, not at a central choke point in commit -- so each   */
+/* test also asserts the injected payload never reaches the client.          */
+/******************************************************************************/
+
+::Method test_crlf_header_value_rejected
+  r = self~httpGet(self~url("crlfhdr"))
+  self~assertEquals("500", r~entry("status"), -
+    "a CR/LF in a []= header value is now rejected, not written through")
+
+::Method test_crlf_header_value_error_page
+  r = self~httpGet(self~url("crlfhdr"))
+  self~assertContains(r~entry("body"), "Internal server error", -
+    "crlfhdr renders the RexxHTTP error page")
+
+::Method test_crlf_header_value_no_injection
+  -- The actual security property: the smuggled header must not reach the
+  -- client, in the headers OR reflected into the body.
+  r = self~httpGet(self~url("crlfhdr"))
+  self~assertNotContains(r~entry("headers"), "X-Injected", -
+    "the injected header never reaches the client")
+  self~assertNotContains(r~entry("body"), "X-Injected", -
+    "the injected header text is not reflected into the body either")
+
+::Method test_crlf_redirect_rejected
+  r = self~httpGet(self~url("crlfrdr"))
+  self~assertEquals("500", r~entry("status"), -
+    "a CR/LF in a redirect() location is now rejected, not written through")
+
+::Method test_crlf_redirect_no_body_splitting
+  -- The worst-case escalation from the audit: double CRLF + smuggled
+  -- Content-Type used to let an attacker's HTML/JS precede the real body.
+  r = self~httpGet(self~url("crlfrdr"))
+  self~assertNotContains(r~entry("body"), "<script>alert(1)</script>", -
+    "the smuggled body/script never reaches the client")
+  self~assertNotContains(r~entry("headers"), "text/html", -
+    "the smuggled Content-Type never overrides the real one")
+
+::Method test_crlf_cookie_value_rejected
+  r = self~httpGet(self~url("crlfck"))
+  self~assertEquals("500", r~entry("status"), -
+    "a CR/LF in a cookie value is now rejected at HTTP.Cookie~new, not written through")
+
+::Method test_crlf_cookie_value_no_injection
+  r = self~httpGet(self~url("crlfck"))
+  self~assertNotContains(r~entry("headers"), "Set-Cookie: mal", -
+    "the smuggled Set-Cookie header never reaches the client")
+
+/******************************************************************************/
+/* The environment pool: [] always reaches the pool (never a like-named       */
+/* method), and operator-set variables resolve with or without a leading       */
+/* underscore through the single REDIRECT_ fallback. Fixture: envpool, with    */
+/* SetEnv MYPLAIN and SetEnv _MYVAR in its .htaccess block.                    */
+/******************************************************************************/
+
+::Method test_envpool_bracket_does_not_reach_method
+  -- ["content_type"] is the CGI variable CONTENT_TYPE (unset here), NOT the
+  -- content_type method. A method hit would have returned a non-empty type.
+  r = self~httpGet(self~url("envpool"))
+  self~assertContains(r~entry("body"), "bracket_method_name=[]", -
+    "[] reaches the pool, not the like-named method")
+
+::Method test_envpool_bracket_standard_var
+  -- SERVER_NAME is set by Apache (hostname or IP); assert it is populated,
+  -- not a specific value, so the test does not depend on the host.
+  r = self~httpGet(self~url("envpool"))
+  self~assertNotContains(r~entry("body"), "bracket_server=[]", -
+    "[] reaches a standard CGI variable (SERVER_NAME is non-empty)")
+
+::Method test_envpool_plain_var_both_ways
+  -- An operator var with no underscore, recovered via the general REDIRECT_
+  -- fallback, identically through ~name and through [].
+  r = self~httpGet(self~url("envpool"))
+  self~assertContains(r~entry("body"), "plain_msg=[plainvalue]", -
+    "an underscore-less operator variable resolves via the message form")
+  self~assertContains(r~entry("body"), "plain_bracket=[plainvalue]", -
+    "the same variable resolves identically through []")
+
+::Method test_envpool_underscore_var_still_resolves
+  -- A leading underscore is no longer special; it is just another pool name.
+  r = self~httpGet(self~url("envpool"))
+  self~assertContains(r~entry("body"), "under_msg=[underscored]", -
+    "an underscore-prefixed variable still resolves (no special branch)")
+  self~assertContains(r~entry("body"), "under_bracket=[underscored]", -
+    "the underscore variable resolves identically through []")
+
+/******************************************************************************/
+/* v113: the HTTP_ branch of ~unknown was merged into the general one, so     */
+/* there is a single branch and a single cache. Client headers must keep      */
+/* resolving, and the REDIRECT_ fallback they newly reach must stay inert.    */
+/******************************************************************************/
+
+::Method test_envpool_client_header_single_branch
+  -- A client header resolves through the merged branch, by message and by [].
+  -- Non-emptiness is the assertion: the value is curl's version string.
+  r = self~httpGet(self~url("envpool"))
+  self~assertNotContains(r~entry("body"), "hdr_msg=[]", -
+    "a client header resolves through the merged branch")
+  self~assertNotContains(r~entry("body"), "hdr_bracket=[]", -
+    "the same client header resolves identically through []")
+
+::Method test_envpool_absent_client_header_stays_empty
+  -- HTTP_ names now reach the REDIRECT_ fallback. Apache never creates a
+  -- REDIRECT_HTTP_* variable, so an absent header must still be empty.
+  r = self~httpGet(self~url("envpool"))
+  self~assertContains(r~entry("body"), "hdr_absent=[]", -
+    "an absent client header stays empty: the REDIRECT_ fallback is inert")
+
+::Method test_envpool_redirect_http_setenv_is_unreachable
+  -- Even a SetEnv named exactly as the fallback cannot feed it: the Action
+  -- sub-request stacks another prefix, delivering REDIRECT_REDIRECT_HTTP_FAKE.
+  r = self~httpGet(self~url("envpool"))
+  self~assertContains(r~entry("body"), "hdr_fake=[]", -
+    "an operator-set REDIRECT_HTTP_ name is not reachable as a fallback")
+  -- Control: the variable really is in the pool, under the stacked name. This
+  -- keeps the assertion above from decaying into a no-op if the SetEnv goes.
+  self~assertContains(r~entry("body"), "hdr_fake_stacked=[fallbackvalue]", -
+    "the SetEnv did arrive, as REDIRECT_REDIRECT_HTTP_FAKE")
+
+/******************************************************************************/
+/* request_url / script_name family (v76 swap + rename).                      */
+/*                                                                            */
+/* v76 renamed the two self/resolved URL values: the old cgi_script_name      */
+/* became ~script_name (the RFC 3875 SCRIPT_NAME, resolved resource, disk->   */
+/* URL from path_translated), and the old ~script_name became ~request_url    */
+/* (the self-referential URL: the client's own URL, PATH_INFO and query       */
+/* string peeled off). These tests pin the swap's contract in a one-hop       */
+/* request and guard it against regression.                                   */
+/*                                                                            */
+/* The urlprobe fixture emits both values; three deployments (urlprobe with   */
+/* a topology-matching BASE/URLBASE pair, urlnobar with no pair, urlremap     */
+/* with a prefix-injecting URLBASE) drive the three cases below. Deployment   */
+/* details live in the runner's setEnvFor map.                                */
+/******************************************************************************/
+
+::Method test_url_one_hop_values_coincide
+  -- One hop, pair matching the real topology: request_url (stored in init)
+  -- and script_name (reconstructed disk->URL) both land on the client's own
+  -- URL, /test/urlprobe. The swap must leave a plain rexlet with the two
+  -- values identical, each reached by its own honest path.
+  r = self~httpGet(self~url("urlprobe"))
+  self~assertContains(r~entry("body"), "request_url=[/test/urlprobe]", -
+    "request_url is the client's own URL in a one-hop request")
+  self~assertContains(r~entry("body"), "script_name=[/test/urlprobe]", -
+    "script_name reconstructs to the same URL in a one-hop request")
+
+::Method test_url_request_url_peels_pathinfo_and_query
+  -- request_url is the client's URL with PATH_INFO and the query string
+  -- peeled off: extra path and ?x=1 must not leak into it.
+  r = self~httpGet(self~url("urlprobe") || "/extra?x=1")
+  self~assertContains(r~entry("body"), "request_url=[/test/urlprobe]", -
+    "request_url peels trailing PATH_INFO and the query string")
+
+::Method test_url_script_name_falls_back_without_pair
+  -- No REXXHTTP_BASE/URLBASE pair: script_name takes its base=="" fallback
+  -- (Return request_url), so the two values still coincide. This guards the
+  -- pre-REXXHTTP_BASE fallback path -- nothing regresses when the anchor is
+  -- absent.
+  r = self~httpGet(self~url("urlnobar"))
+  self~assertContains(r~entry("body"), "request_url=[/test/urlnobar]", -
+    "request_url is populated with no pair configured")
+  self~assertContains(r~entry("body"), "script_name=[/test/urlnobar]", -
+    "script_name falls back to request_url when no pair is configured")
+
+::Method test_url_script_name_reconstructs_when_pair_diverges
+  -- A pair whose URLBASE injects a prefix the client's URL does not carry
+  -- makes script_name (reconstructed: /otheria/urlremap) DIVERGE from
+  -- request_url (stored: /test/urlremap). This proves script_name performs a
+  -- live disk->URL reconstruction rather than aliasing request_url -- without
+  -- it the two previous tests could pass vacuously.
+  r = self~httpGet(self~url("urlremap"))
+  self~assertContains(r~entry("body"), "request_url=[/test/urlremap]", -
+    "request_url keeps the client's URL when the pair injects a prefix")
+  self~assertContains(r~entry("body"), "script_name=[/otheria/urlremap]", -
+    "script_name reconstructs disk->URL through the URLBASE prefix")
+
+::Method test_url_script_name_document_uri_do_not_mutate_base
+  -- §3.5 regression guard. script_name and document_uri normalise the on-disk
+  -- separators of a LOCAL copy (normBase); they must never translate the
+  -- Exposed instance variable `base` in place. If they did, ~RexxHTTP_DIR
+  -- (which returns base) would come back with "/" where the native separator
+  -- belongs after the first call -- corrupting rawResourcePath on Windows.
+  -- The fixture reads ~RexxHTTP_DIR before and after invoking both methods;
+  -- the two reads must be identical. (On this Linux runner sep is "/" so the
+  -- translate branch is not taken, but the guard pins the invariant against a
+  -- future edit that moved the mutation into the common path.)
+  r = self~httpGet(self~url("urlprobe"))
+  self~assertContains(r~entry("body"), "dir_before=["self~asConfigured("/var/www/html/test")"]", -
+    "RexxHTTP_DIR reads the configured base before script_name/document_uri")
+  self~assertContains(r~entry("body"), "dir_after=["self~asConfigured("/var/www/html/test")"]", -
+    "script_name and document_uri leave the instance base unmutated")
+
+::Method test_outputstream_non_ready_methods_refuse_and_return_1
+  -- §3.8 / v110 regression guard. The three output methods of HTTP.OutputStream
+  -- (charout, lineout, arrayout) must refuse to write when the underlying stream
+  -- is not READY: return 1 (the class's uniform 0-success/1-error flag) and leave
+  -- the buffer untouched. arrayout was the gap v110 closed -- before it, arrayout
+  -- was the only output method that appended to the buffer regardless of state.
+  --
+  -- The nrdy fixture forces the condition without a broken path or permissions: a
+  -- fresh .Stream~new that is never opened reports state UNKNOWN (not READY), and
+  -- HTTP.OutputStream~init copies that state verbatim and never re-opens, so the
+  -- wrapper is born non-READY. The fixture drives all three methods on it, then
+  -- calls flush: on a non-READY stream flush returns "<state>:" ("UNKNOWN:", not
+  -- "READY:") and drains nothing, which proves end to end that the buffer stayed
+  -- inert. This closes the deuda left open by v110 (the guard shipped then but the
+  -- suite did not exercise it; the .Stream-UNKNOWN route is what makes it testable
+  -- from a rexlet, where before it seemed to need a runtime harness).
+  r = self~httpGet(self~url("nrdy"))
+  self~assertContains(r~entry("body"), "os_state=[UNKNOWN]", -
+    "an unopened .Stream yields a non-READY HTTP.OutputStream")
+  self~assertContains(r~entry("body"), "rc_charout=[1]", -
+    "charout on a non-READY stream returns 1 (error), writing nothing")
+  self~assertContains(r~entry("body"), "rc_lineout=[1]", -
+    "lineout on a non-READY stream returns 1 (error), writing nothing")
+  self~assertContains(r~entry("body"), "rc_arrayout=[1]", -
+    "arrayout on a non-READY stream returns 1 (the v110 guard), writing nothing")
+  self~assertContains(r~entry("body"), "flush_result=[UNKNOWN:]", -
+    "flush on a non-READY stream drains nothing and reports the state")
+
+/******************************************************************************/
+/* CGI-contract matrix (variable x topology).                                 */
+/*                                                                            */
+/* RexxHTTP fakes a clean CGI level-1 for a rexlet author who has read a      */
+/* simple CGI tutorial: the variables they expect, reachable as ~request~foo  */
+/* instead of digging in the environment. We are really level 2 (served by an */
+/* Action wrapper); a rexlet-as-Action is level 3 faking level 2. This matrix */
+/* pins, for each contracted variable, that the reconstructed value is what a */
+/* pure CGI would give, across every topology where the fake must hold.       */
+/*                                                                            */
+/* Two axes:                                                                  */
+/*   - VARIABLE: one row per contracted CGI variable (request_url,            */
+/*     script_name today; more as they are validated).                        */
+/*   - TOPOLOGY: twelve cells = docroot/Alias x rexlet/DirectoryIndex x       */
+/*     one/two hops x with/without extra path, minus the impossible           */
+/*     DirectoryIndex+extra (Apache hard 404). Deployed by DeployMatrix in    */
+/*     RunHTTPTests.rex across zones /mtx (docroot) and /ali (Alias).         */
+/*                                                                            */
+/* The expected value in each cell is a LITERAL, decided by hand when the     */
+/* cell was validated in the lab -- never predicted in code, so the test does */
+/* not reimplement what it checks. A cell whose contract is "licence" (no     */
+/* guarantee, e.g. some level-3 corner) carries .nil and is probed but not    */
+/* asserted. To bring a new variable under contract: activate its line in the */
+/* cgivars probe, run the matrix once to see the twelve emitted values,       */
+/* decide which are correct, and add a row here.                              */
+/******************************************************************************/
+
+/* The twelve topology cells: id -> probe URL. The id also names the cell in  */
+/* assertion messages. baseURL is the class default (http://127.0.0.1).       */
+
+::Method matrixCells
+  base = self~class~baseURL
+  cells = .Array~new
+  -- docroot zone (/mtx)
+  cells~append(.Array~of("doc/rexlet/1hop/plain",   base"/mtx/probe.rxl"))
+  cells~append(.Array~of("doc/rexlet/1hop/extra",   base"/mtx/probe.rxl/x/y"))
+  cells~append(.Array~of("doc/rexlet/2hop/plain",   base"/mtx/target.mtx"))
+  cells~append(.Array~of("doc/rexlet/2hop/extra",   base"/mtx/target.mtx/x/y"))
+  cells~append(.Array~of("doc/dirindex/1hop/plain", base"/mtx/"))
+  cells~append(.Array~of("doc/dirindex/2hop/plain", base"/mtx/sub/"))
+  -- aliased zone (/ali)
+  cells~append(.Array~of("ali/rexlet/1hop/plain",   base"/ali/probe.rxl"))
+  cells~append(.Array~of("ali/rexlet/1hop/extra",   base"/ali/probe.rxl/x/y"))
+  cells~append(.Array~of("ali/rexlet/2hop/plain",   base"/ali/target.mtx"))
+  cells~append(.Array~of("ali/rexlet/2hop/extra",   base"/ali/target.mtx/x/y"))
+  cells~append(.Array~of("ali/dirindex/1hop/plain", base"/ali/"))
+  cells~append(.Array~of("ali/dirindex/2hop/plain", base"/ali/sub/"))
+  Return cells
+
+/* The contract table for one variable: a Directory mapping cell-id -> the    */
+/* literal value a pure CGI would expose there. .nil means "licence" (probe   */
+/* but do not assert). Keyed exactly by the ids in matrixCells.               */
+
+::Method contractFor
+  Use Strict Arg varName
+
+  c = .Directory~new
+
+  Select Case varName
+    When "request_url" Then Do
+      -- The self-referential URL: what the client typed, extra path and query
+      -- peeled off. Guaranteed exact in ALL twelve cells (level-2 fake holds
+      -- through two hops, per the v77 fix).
+      c["doc/rexlet/1hop/plain"]   = "/mtx/probe.rxl"
+      c["doc/rexlet/1hop/extra"]   = "/mtx/probe.rxl"
+      c["doc/rexlet/2hop/plain"]   = "/mtx/target.mtx"
+      c["doc/rexlet/2hop/extra"]   = "/mtx/target.mtx"
+      c["doc/dirindex/1hop/plain"] = "/mtx/"
+      c["doc/dirindex/2hop/plain"] = "/mtx/sub/"
+      c["ali/rexlet/1hop/plain"]   = "/ali/probe.rxl"
+      c["ali/rexlet/1hop/extra"]   = "/ali/probe.rxl"
+      c["ali/rexlet/2hop/plain"]   = "/ali/target.mtx"
+      c["ali/rexlet/2hop/extra"]   = "/ali/target.mtx"
+      c["ali/dirindex/1hop/plain"] = "/ali/"
+      c["ali/dirindex/2hop/plain"] = "/ali/sub/"
+    End
+    When "script_name" Then Do
+      -- RFC 3875 SCRIPT_NAME: the resolved resource Apache ran. In one hop the
+      -- rexlet itself; in two hops the Action processor (probe.rxl); under
+      -- DirectoryIndex the resolved index. Guaranteed exact in all twelve.
+      c["doc/rexlet/1hop/plain"]   = "/mtx/probe.rxl"
+      c["doc/rexlet/1hop/extra"]   = "/mtx/probe.rxl"
+      c["doc/rexlet/2hop/plain"]   = "/mtx/probe.rxl"
+      c["doc/rexlet/2hop/extra"]   = "/mtx/probe.rxl"
+      c["doc/dirindex/1hop/plain"] = "/mtx/index.rxl"
+      c["doc/dirindex/2hop/plain"] = "/mtx/probe.rxl"
+      c["ali/rexlet/1hop/plain"]   = "/ali/probe.rxl"
+      c["ali/rexlet/1hop/extra"]   = "/ali/probe.rxl"
+      c["ali/rexlet/2hop/plain"]   = "/ali/probe.rxl"
+      c["ali/rexlet/2hop/extra"]   = "/ali/probe.rxl"
+      c["ali/dirindex/1hop/plain"] = "/ali/index.rxl"
+      c["ali/dirindex/2hop/plain"] = "/ali/probe.rxl"
+    End
+    When "request_uri" Then Do
+      -- RFC 3875 REQUEST_URI: the raw request line Apache received, exactly what
+      -- the client typed -- extra PATH_INFO and query string INCLUDED, unlike
+      -- request_url. Apache never rewrites it across Action sub-requests, so it
+      -- is the client's URL verbatim in all twelve. In the two-hop cells this
+      -- is the document (target.mtx), which DIFFERS from script_name (the
+      -- resolved processor, probe.rxl): the row is not vacuous. Guaranteed
+      -- exact in all twelve.
+      c["doc/rexlet/1hop/plain"]   = "/mtx/probe.rxl"
+      c["doc/rexlet/1hop/extra"]   = "/mtx/probe.rxl/x/y"
+      c["doc/rexlet/2hop/plain"]   = "/mtx/target.mtx"
+      c["doc/rexlet/2hop/extra"]   = "/mtx/target.mtx/x/y"
+      c["doc/dirindex/1hop/plain"] = "/mtx/"
+      c["doc/dirindex/2hop/plain"] = "/mtx/sub/"
+      c["ali/rexlet/1hop/plain"]   = "/ali/probe.rxl"
+      c["ali/rexlet/1hop/extra"]   = "/ali/probe.rxl/x/y"
+      c["ali/rexlet/2hop/plain"]   = "/ali/target.mtx"
+      c["ali/rexlet/2hop/extra"]   = "/ali/target.mtx/x/y"
+      c["ali/dirindex/1hop/plain"] = "/ali/"
+      c["ali/dirindex/2hop/plain"] = "/ali/sub/"
+    End
+    When "path_info" Then Do
+      -- RFC 3875 PATH_INFO: the extra path the client appended AFTER the
+      -- executed resource -- the tail Apache did not consume resolving the
+      -- script. A pure CGI never leaks the script name into it: it is the
+      -- extra ("/x/y") or empty. In the two-hop cells Apache's PATH_INFO
+      -- smuggling fuses processor+document+tail into the raw value; the Action
+      -- cut in init peels it back to the tail only, so 2hop/extra reads "/x/y"
+      -- just like 1hop/extra -- same value, reconstructed path, which is what
+      -- makes the level-2 fake honest. Guaranteed exact in all twelve.
+      c["doc/rexlet/1hop/plain"]   = ""
+      c["doc/rexlet/1hop/extra"]   = "/x/y"
+      c["doc/rexlet/2hop/plain"]   = ""
+      c["doc/rexlet/2hop/extra"]   = "/x/y"
+      c["doc/dirindex/1hop/plain"] = ""
+      c["doc/dirindex/2hop/plain"] = ""
+      c["ali/rexlet/1hop/plain"]   = ""
+      c["ali/rexlet/1hop/extra"]   = "/x/y"
+      c["ali/rexlet/2hop/plain"]   = ""
+      c["ali/rexlet/2hop/extra"]   = "/x/y"
+      c["ali/dirindex/1hop/plain"] = ""
+      c["ali/dirindex/2hop/plain"] = ""
+    End
+    When "path_translated" Then Do
+      -- PATH_TRANSLATED, RexxHTTP flavour: the on-disk path of the DOCUMENT the
+      -- client requested -- the disk twin of REQUEST_URL, and an alias of
+      -- FILENAME (init assigns both from the same resolution). This DIVERGES
+      -- from the strict RFC 3875 reading (there PATH_TRANSLATED is PATH_INFO
+      -- mapped to disk) and ALSO from the older RexxHTTP reading (the processor
+      -- path): the processor now lives in SCRIPT_FILENAME, which is what the
+      -- runtime Calls. Not a licence: exact and deterministic in all twelve.
+      -- One hop -> the requested rexlet (requested == processor); two hops ->
+      -- the Action document (target.mtx, NOT the processor); dirindex -> the
+      -- resolved index file actually served. Roots are the two matrix zones
+      -- fixed in DeployMatrix: /var/www/html/mtx (docroot) and
+      -- /opt/rexxhttp-matrix (aliased). Absolute literals are legitimate here
+      -- because DeployMatrix owns those roots -- change them there and this row
+      -- changes with them.
+      c["doc/rexlet/1hop/plain"]   = self~onDisk("/var/www/html/mtx/probe.rxl")
+      c["doc/rexlet/1hop/extra"]   = self~onDisk("/var/www/html/mtx/probe.rxl")
+      c["doc/rexlet/2hop/plain"]   = self~onDisk("/var/www/html/mtx/target.mtx")
+      c["doc/rexlet/2hop/extra"]   = self~onDisk("/var/www/html/mtx/target.mtx")
+      c["doc/dirindex/1hop/plain"] = self~onDisk("/var/www/html/mtx/index.rxl")
+      c["doc/dirindex/2hop/plain"] = self~onDisk("/var/www/html/mtx/sub/index.mtx")
+      c["ali/rexlet/1hop/plain"]   = self~onDisk("/opt/rexxhttp-matrix/probe.rxl")
+      c["ali/rexlet/1hop/extra"]   = self~onDisk("/opt/rexxhttp-matrix/probe.rxl")
+      c["ali/rexlet/2hop/plain"]   = self~onDisk("/opt/rexxhttp-matrix/target.mtx")
+      c["ali/rexlet/2hop/extra"]   = self~onDisk("/opt/rexxhttp-matrix/target.mtx")
+      c["ali/dirindex/1hop/plain"] = self~onDisk("/opt/rexxhttp-matrix/index.rxl")
+      c["ali/dirindex/2hop/plain"] = self~onDisk("/opt/rexxhttp-matrix/sub/index.mtx")
+    End
+    When "filename" Then Do
+      -- FILENAME: the on-disk path of the DOCUMENT the client requested -- the
+      -- file on disk of what was asked for. Alias of PATH_TRANSLATED (init
+      -- assigns both from the same resolution; each is a plain attribute getter).
+      -- One hop -> the requested rexlet (requested == processor); two hops ->
+      -- the Action document (target.mtx); dirindex -> the resolved index served
+      -- (index.rxl in one hop, sub/index.mtx in two). The processor that runs
+      -- it is SCRIPT_FILENAME, a separate row. It keeps its own literals, not a
+      -- reference to path_translated: the framework is literal-per-cell so each
+      -- variable is anchored to its own observed value, and if the two ever
+      -- diverge only the moved cells change here. Guaranteed exact in all twelve.
+      c["doc/rexlet/1hop/plain"]   = self~onDisk("/var/www/html/mtx/probe.rxl")
+      c["doc/rexlet/1hop/extra"]   = self~onDisk("/var/www/html/mtx/probe.rxl")
+      c["doc/rexlet/2hop/plain"]   = self~onDisk("/var/www/html/mtx/target.mtx")
+      c["doc/rexlet/2hop/extra"]   = self~onDisk("/var/www/html/mtx/target.mtx")
+      c["doc/dirindex/1hop/plain"] = self~onDisk("/var/www/html/mtx/index.rxl")
+      c["doc/dirindex/2hop/plain"] = self~onDisk("/var/www/html/mtx/sub/index.mtx")
+      c["ali/rexlet/1hop/plain"]   = self~onDisk("/opt/rexxhttp-matrix/probe.rxl")
+      c["ali/rexlet/1hop/extra"]   = self~onDisk("/opt/rexxhttp-matrix/probe.rxl")
+      c["ali/rexlet/2hop/plain"]   = self~onDisk("/opt/rexxhttp-matrix/target.mtx")
+      c["ali/rexlet/2hop/extra"]   = self~onDisk("/opt/rexxhttp-matrix/target.mtx")
+      c["ali/dirindex/1hop/plain"] = self~onDisk("/opt/rexxhttp-matrix/index.rxl")
+      c["ali/dirindex/2hop/plain"] = self~onDisk("/opt/rexxhttp-matrix/sub/index.mtx")
+    End
+    When "script_filename" Then Do
+      -- SCRIPT_FILENAME: the on-disk path of the PROCESSOR -- the rexlet Apache
+      -- resolved and ran, the disk twin of SCRIPT_NAME. This is the value the
+      -- runtime Calls (RexxHTTP.rex: callee = .request~script_filename), and the
+      -- value ~script_name maps back to URL space. One hop -> == FILENAME
+      -- (requested == processor). Two hops -> the Action processor (probe.rxl),
+      -- distinct from FILENAME/PATH_TRANSLATED (the document). Dirindex -> the
+      -- resolved index rexlet in one hop; the Action processor in two. It holds
+      -- the value PATH_TRANSLATED carried before PATH_TRANSLATED took on its
+      -- document meaning. Exact and deterministic in all twelve.
+      c["doc/rexlet/1hop/plain"]   = self~onDisk("/var/www/html/mtx/probe.rxl")
+      c["doc/rexlet/1hop/extra"]   = self~onDisk("/var/www/html/mtx/probe.rxl")
+      c["doc/rexlet/2hop/plain"]   = self~onDisk("/var/www/html/mtx/probe.rxl")
+      c["doc/rexlet/2hop/extra"]   = self~onDisk("/var/www/html/mtx/probe.rxl")
+      c["doc/dirindex/1hop/plain"] = self~onDisk("/var/www/html/mtx/index.rxl")
+      c["doc/dirindex/2hop/plain"] = self~onDisk("/var/www/html/mtx/probe.rxl")
+      c["ali/rexlet/1hop/plain"]   = self~onDisk("/opt/rexxhttp-matrix/probe.rxl")
+      c["ali/rexlet/1hop/extra"]   = self~onDisk("/opt/rexxhttp-matrix/probe.rxl")
+      c["ali/rexlet/2hop/plain"]   = self~onDisk("/opt/rexxhttp-matrix/probe.rxl")
+      c["ali/rexlet/2hop/extra"]   = self~onDisk("/opt/rexxhttp-matrix/probe.rxl")
+      c["ali/dirindex/1hop/plain"] = self~onDisk("/opt/rexxhttp-matrix/index.rxl")
+      c["ali/dirindex/2hop/plain"] = self~onDisk("/opt/rexxhttp-matrix/probe.rxl")
+    End
+    When "document_uri" Then Do
+      -- DOCUMENT_URI: the URL-space path of the served DOCUMENT, carrying its
+      -- URL prefix -- the disk->URL twin of FILENAME, as SCRIPT_NAME is the twin
+      -- of SCRIPT_FILENAME. It RESOLVES what URI leaves raw: URI is the client's
+      -- typed URL (query stripped), so it keeps the extra tail and names the
+      -- directory for a dirindex; document_uri follows filename instead, so the
+      -- tail is dropped (the document is named, not its trailing path) and a
+      -- dirindex resolves to the index served. Compare cell by cell with the
+      -- FILENAME row: same twelve resolutions, mapped from disk base to URL
+      -- prefix (/var/www/html/mtx -> /mtx, /opt/rexxhttp-matrix -> /ali).
+      -- Guaranteed exact in all twelve.
+      c["doc/rexlet/1hop/plain"]   = "/mtx/probe.rxl"
+      c["doc/rexlet/1hop/extra"]   = "/mtx/probe.rxl"
+      c["doc/rexlet/2hop/plain"]   = "/mtx/target.mtx"
+      c["doc/rexlet/2hop/extra"]   = "/mtx/target.mtx"
+      c["doc/dirindex/1hop/plain"] = "/mtx/index.rxl"
+      c["doc/dirindex/2hop/plain"] = "/mtx/sub/index.mtx"
+      c["ali/rexlet/1hop/plain"]   = "/ali/probe.rxl"
+      c["ali/rexlet/1hop/extra"]   = "/ali/probe.rxl"
+      c["ali/rexlet/2hop/plain"]   = "/ali/target.mtx"
+      c["ali/rexlet/2hop/extra"]   = "/ali/target.mtx"
+      c["ali/dirindex/1hop/plain"] = "/ali/index.rxl"
+      c["ali/dirindex/2hop/plain"] = "/ali/sub/index.mtx"
+    End
+    When "uri" Then Do
+      -- URI: the client's typed URL with the query string stripped -- REQUEST_URI
+      -- minus the "?..." tail, and nothing else touched. It keeps the extra
+      -- PATH_INFO and the URL prefix, and for a dirindex it names the directory
+      -- as typed (trailing slash, NOT the resolved index). That is what sets it
+      -- apart from document_uri, which follows filename to the served document:
+      -- compare the two rows cell by cell -- they agree on the rexlet cells and
+      -- DIVERGE on the two extra cells (uri keeps "/x/y", document_uri drops it)
+      -- and on the two dirindex cells (uri names the directory, document_uri the
+      -- index). Verified equal to the request_uri row in all twelve because none
+      -- of the matrix cells carries a query; a query would appear in request_uri
+      -- but not here (confirmed by HTTP: /mtx/probe.rxl?a=1&b=2 -> uri
+      -- "/mtx/probe.rxl"). Guaranteed exact in all twelve.
+      c["doc/rexlet/1hop/plain"]   = "/mtx/probe.rxl"
+      c["doc/rexlet/1hop/extra"]   = "/mtx/probe.rxl/x/y"
+      c["doc/rexlet/2hop/plain"]   = "/mtx/target.mtx"
+      c["doc/rexlet/2hop/extra"]   = "/mtx/target.mtx/x/y"
+      c["doc/dirindex/1hop/plain"] = "/mtx/"
+      c["doc/dirindex/2hop/plain"] = "/mtx/sub/"
+      c["ali/rexlet/1hop/plain"]   = "/ali/probe.rxl"
+      c["ali/rexlet/1hop/extra"]   = "/ali/probe.rxl/x/y"
+      c["ali/rexlet/2hop/plain"]   = "/ali/target.mtx"
+      c["ali/rexlet/2hop/extra"]   = "/ali/target.mtx/x/y"
+      c["ali/dirindex/1hop/plain"] = "/ali/"
+      c["ali/dirindex/2hop/plain"] = "/ali/sub/"
+    End
+    When "query_string" Then Do
+      -- QUERY_STRING: the raw query the client sent, verbatim -- everything after
+      -- the "?", or empty when there is none. RexxHTTP does not parse or rewrite
+      -- it here; the arg-policy layer consumes a parsed copy elsewhere. None of
+      -- the twelve matrix cells carries a query, so the contract value is empty
+      -- in all twelve -- the faithful CGI value for a query-less request. The
+      -- non-empty behaviour is confirmed by HTTP in the lab, not by these cells:
+      -- /mtx/probe.rxl?a=1&b=2 emits query_string "a=1&b=2" while uri stays
+      -- "/mtx/probe.rxl". (A bare token without "=" such as "?forget" is rejected
+      -- 400 by the strict arg-policy before the probe runs -- todo item 9 -- so a
+      -- well-formed "k=v" query is what exercises the non-empty path.) Guaranteed
+      -- exact (empty) in all twelve.
+      c["doc/rexlet/1hop/plain"]   = ""
+      c["doc/rexlet/1hop/extra"]   = ""
+      c["doc/rexlet/2hop/plain"]   = ""
+      c["doc/rexlet/2hop/extra"]   = ""
+      c["doc/dirindex/1hop/plain"] = ""
+      c["doc/dirindex/2hop/plain"] = ""
+      c["ali/rexlet/1hop/plain"]   = ""
+      c["ali/rexlet/1hop/extra"]   = ""
+      c["ali/rexlet/2hop/plain"]   = ""
+      c["ali/rexlet/2hop/extra"]   = ""
+      c["ali/dirindex/1hop/plain"] = ""
+      c["ali/dirindex/2hop/plain"] = ""
+    End
+    Otherwise
+      self~fail("no contract row defined for variable" varName)
+  End
+
+  Return c
+
+/* probeVar: GET the cell URL, pull "varName=[value]" out of the body, return  */
+/* the value between the brackets. Returns .nil if the line is absent.         */
+
+::Method probeVar
+  Use Strict Arg url, varName
+
+  body = self~httpGet(url)~entry("body")
+  marker = varName"=["
+  p = body~pos(marker)
+  If p == 0 Then Return .nil
+  start = p + marker~length
+  q = body~pos("]", start)
+  If q == 0 Then Return .nil
+  Return body~substr(start, q - start)
+
+/* runContractRow: walk the twelve cells for one variable, asserting each      */
+/* value against its contract literal. .nil in the table = licence: probed for */
+/* reachability but not asserted. One assertion per guaranteed cell, so a      */
+/* failure names the exact (variable, cell).                                   */
+
+::Method runContractRow
+  Use Strict Arg varName
+
+  contract = self~contractFor(varName)
+
+  Do cell Over self~matrixCells
+    id  = cell[1]
+    url = cell[2]
+    expected = contract[id]
+    actual   = self~probeVar(url, varName)
+    If expected == .nil Then
+      -- Licence cell: no contract, just confirm the probe was reachable.
+      self~assertTrue(actual \== .nil, varName "@" id "(licence): probe reachable")
+    Else
+      self~assertEquals(expected, actual, varName "@" id)
+  End
+
+::Method test_cgi_contract_request_url
+  self~runContractRow("request_url")
+
+::Method test_cgi_contract_script_name
+  self~runContractRow("script_name")
+
+::Method test_cgi_contract_request_uri
+  self~runContractRow("request_uri")
+
+::Method test_cgi_contract_path_info
+  self~runContractRow("path_info")
+
+::Method test_cgi_contract_path_translated
+  self~runContractRow("path_translated")
+
+::Method test_cgi_contract_filename
+  self~runContractRow("filename")
+
+::Method test_cgi_contract_script_filename
+  self~runContractRow("script_filename")
+
+::Method test_cgi_contract_document_uri
+  self~runContractRow("document_uri")
+
+::Method test_cgi_contract_uri
+  self~runContractRow("uri")
+
+::Method test_cgi_contract_query_string
+  self~runContractRow("query_string")
+
+/******************************************************************************/
+/* rawResourcePath: percent-encoded Action document names (v99).              */
+/* An Action document whose name needs encoding (here a space) must resolve   */
+/* to its real on-disk path. Before the fix rawResourcePath left REQUEST_URI  */
+/* %-encoded, so the SysIsFile walk missed the file and ~filename came out    */
+/* garbled -> 500. The document lives in the matrix docroot zone as           */
+/* "spaced doc.mtx", requested as /mtx/spaced%20doc.mtx. See ref-decisiones   */
+/* "v99 -- rawResourcePath".                                                  */
+/******************************************************************************/
+
+::Method test_encoded_doc_filename_resolves
+  r = self~httpGet(self~class~baseURL || "/mtx/spaced%20doc.mtx")
+  self~assertContains(r~entry("body"), "filename=["self~onDisk("/var/www/html/mtx/spaced doc.mtx")"]", -
+    "rawResourcePath: %20 in an Action document name resolves to the real file")
+
+::Method test_encoded_doc_path_translated_resolves
+  r = self~httpGet(self~class~baseURL || "/mtx/spaced%20doc.mtx")
+  self~assertContains(r~entry("body"), "path_translated=["self~onDisk("/var/www/html/mtx/spaced doc.mtx")"]", -
+    "rawResourcePath: path_translated is the decoded on-disk document path")
+
+::Method test_encoded_doc_status_ok
+  r = self~httpGet(self~class~baseURL || "/mtx/spaced%20doc.mtx")
+  self~assertEquals("200", r~entry("status"), -
+    "an Action document with an encoded name is served, not 500ed")
+
+
+/******************************************************************************/
+/* Encoding family: the four encoders (Response) and two decoders (Request),  */
+/* exercised through the instance accessor — the idiomatic rexxlet path,      */
+/* which delegates to the class method. The enc fixture runs each on a string */
+/* chosen to bite: reserved chars, space, tilde, quotes. encodeURI must keep  */
+/* the reserved chars a formed URL needs; encodeURIComponent must escape them; */
+/* encodeForm uses + for space and escapes ~ but keeps *; the decoders differ */
+/* on +; and each pair must round-trip.                                       */
+/******************************************************************************/
+
+::Method test_enc_html_five_entities
+  -- encodeHTML escapes all five (& < > " '), closing the attribute-context
+  -- hole that the old three-entity escapeHTML left open.
+  r = self~httpGet(self~url("enc"))
+  self~assertContains(r~entry("body"), "html=a&lt;b&gt;&amp;&quot;x&quot;&#39;", -
+    "encodeHTML escapes & < > "" ' (all five entities)")
+
+::Method test_enc_uricomponent_escapes_reserved
+  -- A component escapes the reserved chars so they cannot break the URL;
+  -- space is %20 and the unreserved tilde stays raw.
+  r = self~httpGet(self~url("enc"))
+  self~assertContains(r~entry("body"), "uric=a%20b%26c%3Dd%2Fe~z", -
+    "encodeURIComponent escapes & = / (space %20, ~ left raw)")
+
+::Method test_enc_uri_keeps_reserved
+  -- A formed URL keeps its reserved structure; only the space is escaped.
+  r = self~httpGet(self~url("enc"))
+  self~assertContains(r~entry("body"), "uri=http://a/b?x=1&y=2%20z", -
+    "encodeURI respects reserved chars and escapes only the space")
+
+::Method test_enc_form_plus_and_tilde
+  -- form-urlencoded: space is +, ~ is escaped (WHATWG safe set), * stays raw.
+  r = self~httpGet(self~url("enc"))
+  self~assertContains(r~entry("body"), "form=a+b%26c%7Ed*e", -
+    "encodeForm uses + for space, escapes ~, keeps *")
+
+::Method test_enc_decode_uricomponent_keeps_plus
+  -- decodeURIComponent leaves + literal; only %20 becomes space.
+  r = self~httpGet(self~url("enc"))
+  self~assertContains(r~entry("body"), "duric=a+b c", -
+    "decodeURIComponent leaves + literal, decodes %20 to space")
+
+::Method test_enc_decode_form_plus_to_space
+  -- decodeForm turns both + and %20 into space.
+  r = self~httpGet(self~url("enc"))
+  self~assertContains(r~entry("body"), "dform=a b c", -
+    "decodeForm decodes both + and %20 to space")
+
+::Method test_enc_roundtrip_uricomponent
+  r = self~httpGet(self~url("enc"))
+  self~assertContains(r~entry("body"), "rturic=Hello, World! a b&c=d/e~z", -
+    "decodeURIComponent(encodeURIComponent(s)) recovers s")
+
+::Method test_enc_roundtrip_form
+  r = self~httpGet(self~url("enc"))
+  self~assertContains(r~entry("body"), "rtform=Hello, World! a b&c=d/e~z", -
+    "decodeForm(encodeForm(s)) recovers s")
