@@ -11,6 +11,7 @@ on:
       - 'include/**'
       - 'build.cmd'
       - 'tests/rexxhttp-suite.ps1'
+      - 'tests/overlay/**'
       - '.github/workflows/windows-rexxhttp.yml'
   workflow_dispatch:
 
@@ -57,6 +58,11 @@ jobs:
           curl.exe -sSfL -o "$env:RUNNER_TEMP\rexxhttp.zip" https://rexx.epbcn.com/rexxhttp/rexxhttp-latest.zip
           Expand-Archive "$env:RUNNER_TEMP\rexxhttp.zip" "$env:RUNNER_TEMP\rexxhttp" -Force
           "REXXHTTP=$env:RUNNER_TEMP\rexxhttp" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          # TEMPORARY: RexxHTTP files changed here and not yet published.
+          if (Test-Path tests\overlay\rexxhttp) {
+              Copy-Item -Recurse -Force tests\overlay\rexxhttp\* "$env:RUNNER_TEMP\rexxhttp"
+              Get-ChildItem -Recurse -File tests\overlay\rexxhttp | ForEach-Object { "overlaid: $($_.Name)" }
+          }
 
       - name: Build
         shell: cmd
