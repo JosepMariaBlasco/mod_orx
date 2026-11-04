@@ -33,6 +33,9 @@
 /*   status  - the HTTP status code as a string ("200", "404", ...)           */
 /*   body    - the response body (text), lines joined with LF                 */
 /*   headers - the raw response header block (text), as returned by curl -D   */
+/*   raw     - the response body exactly as received, every byte (body joins  */
+/*             its lines with LF and drops the last terminator; raw does not, */
+/*             whatever framing Apache chose: Content-Length or chunked)      */
 /*                                                                            */
 /* An optional cookie jar file may be supplied. If given, curl reads it with  */
 /* -b (sends stored cookies) and writes it with -c (stores Set-Cookie), so    */
@@ -123,6 +126,7 @@
   response~setEntry("status",  self~slurp(tmpStat~absolutePath)~strip)
   response~setEntry("headers", self~slurp(tmpHdr~absolutePath))
   response~setEntry("body",    self~slurp(tmpBody~absolutePath))
+  response~setEntry("raw",     self~slurpRaw(tmpBody~absolutePath))
 
   Do f Over .Array~of(tmpBody, tmpHdr, tmpStat, tmpHead)
     f~delete
@@ -195,6 +199,23 @@
   Call Stream path, "C", "Close"
 
   Return lines~makeString("L", "0A"x)
+
+/******************************************************************************/
+/* slurpRaw (private): read an entire file, byte for byte. Returns "" if the  */
+/* file does not exist.                                                       */
+/******************************************************************************/
+
+::Method slurpRaw Private
+  Use Strict Arg path
+
+  If Stream(path, "C", "Query Exists") == "" Then Return ""
+
+  s = .Stream~new(path)
+  s~open("Read")
+  data = s~charIn(1, s~chars)
+  s~close
+
+  Return data
 
 /******************************************************************************/
 /* Assertions on response text                                                */

@@ -707,13 +707,16 @@ Else
   -- Elements present and separated by LF. NB: the test harness's slurp() reads
   -- the body line by line and rejoins WITHOUT a trailing terminator, so
   -- entry("body") cannot see the last LF -- assert only the inter-element joins
-  -- here, and check the final terminator via Content-Length below.
+  -- here, and check the final terminator on the raw bytes below.
   self~assertContains(r~entry("body"), "alpha"||"0A"x||"beta"||"0A"x||"gamma", -
     "arrayout writes the array elements joined by LF")
   -- The terminator IS on the wire: body is "alpha\nbeta\ngamma\n" = 17 bytes.
-  -- Without the v106 final terminator it would be 16. Content-Length is the
-  -- byte-accurate channel (slurp would hide the difference).
-  self~assertHeader(r~entry("headers"), "Content-Length", "17", -
+  -- Without the v106 final terminator it would be 16. entry("raw") is the
+  -- byte-accurate channel (slurp would hide the difference). Not
+  -- Content-Length: measured, Apache sends one under mod_cgid on Linux and
+  -- under mod_orx, but chunks the response under mod_cgi on Windows, with no
+  -- Content-Length and the very same 17 bytes.
+  self~assertSame("alpha"||"0A"x||"beta"||"0A"x||"gamma"||"0A"x, r~entry("raw"), -
     "arrayout terminates the last line with LF: body is 17 bytes, not 16" -
     "(deliberate LF-not-CRLF; converges with Stream~arrayout on LF platforms)")
 
