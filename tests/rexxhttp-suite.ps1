@@ -211,6 +211,10 @@ $httpd = Start-Process "$Apache\bin\httpd.exe" -ArgumentList '-f', "$Apache\conf
 Start-Sleep 4
 $smoke = & curl.exe -s -m 30 -o NUL -w '%{http_code}' http://127.0.0.1:$Port/test/hola
 "SMOKE $Handler /test/hola: $smoke"
+# PROBE (for now): /test/arrout's headers and its exact bytes.
+& curl.exe -s -m 30 -D - -o "$env:TEMP\arrout.bin" "http://127.0.0.1:$Port/test/arrout" | ForEach-Object { "PROBE arrout header: $_" }
+$ab = [IO.File]::ReadAllBytes("$env:TEMP\arrout.bin")
+"PROBE arrout body: $($ab.Length) bytes: $(($ab | ForEach-Object { $_.ToString('x2') }) -join ' ')"
 Clear-Content $log -ErrorAction SilentlyContinue      # count only the suite
 
 Push-Location "$RexxHTTP\tests"
