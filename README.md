@@ -495,6 +495,11 @@ Continuous integration (`.github/workflows/ci.yml`) runs every test on
 Ubuntu under both MPMs, and builds mod_orx and runs `tests/standalone.sh`
 on macOS; `.github/workflows/windows.yml` runs `tests/windows.ps1` on
 Windows. Each test reports through annotations (`tests/ci-run.sh`).
+`tests/start-hold.sh`, which needs no Apache, checks that the host's master
+does not start children one after another when they die while starting (a
+crash loading a preloaded package, say): it waits 1 s, then 2, 4... up to
+60, one child at a time, and logs each such death; the pool fills again once
+children can start. `tests/windows.ps1` checks the same on Windows.
 `tests/apache.sh` checks `Address APACHE` in the providers and the logging
 hook; `tests/native-phases.sh`, the `OoRexx<Phase>Hook` hooks: the order of
 the phases, every kind of return value, what each phase may change, the

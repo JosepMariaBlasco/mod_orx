@@ -121,6 +121,7 @@ jobs:
         run: |
           tests/ci-run.sh "macOS standalone event" tests/standalone.sh event
           tests/ci-run.sh "macOS standalone prefork" tests/standalone.sh prefork
+          tests/ci-run.sh "macOS start-hold" tests/start-hold.sh
 
       - name: The mod_rexx layer builds (not required yet)
         continue-on-error: true

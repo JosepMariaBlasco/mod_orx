@@ -26,4 +26,5 @@ run "$L native-phases"  tests/native-phases.sh
 run "$L lifecycle"      tests/lifecycle.sh;    leftovers
 run "$L restart"        tests/restart.sh
 run "$L standalone"     tests/standalone.sh "$L"
+run "$L start-hold"     tests/start-hold.sh
 exit $F
