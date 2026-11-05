@@ -118,9 +118,9 @@ file type for Oryx, the internal product name of what became ooRexx.
 Requirements:
 
 - Apache 2.4 with `apxs` (Debian/Ubuntu: `apache2-dev`);
-- ooRexx 5.3.0 (r13358 or later) with its API headers: the `APACHE`
+- ooRexx 5.3.0 (r13379 or later) with its API headers: the `APACHE`
   environment of native programs is a `.CommandHandler`, new in 5.3.0,
-  and r13358 has the fixes mod_orx's tests run against (among them
+  and r13379 has the fixes mod_orx's tests run against (among them
   [#2135](https://sourceforge.net/p/oorexx/bugs/2135/): before it, an
   Apache started from another user's session, with that user's
   `XDG_RUNTIME_DIR`, made every new interpreter wait about 2 s for `rxapi`);

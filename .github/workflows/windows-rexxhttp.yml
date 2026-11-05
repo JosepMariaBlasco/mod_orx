@@ -16,7 +16,7 @@ on:
 
 env:
   OOREXX_FILES: https://sourceforge.net/projects/oorexx/files/oorexx/5.3.0beta
-  OOREXX_REV: "13358"
+  OOREXX_REV: "13379"
 
 jobs:
   suite:
