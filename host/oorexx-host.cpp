@@ -1183,6 +1183,35 @@ static int  slot_get(int i)        { return __atomic_load_n(&g_slots[i].state, _
 /* restart a host that exits with it, since it would only fail again.       */
 #define EXIT_CONFIG 2
 
+/* A child that dies before it is ready (its slot still STARTING) failed to */
+/* start, for a reason that is not the configuration (EXIT_CONFIG stops the */
+/* host instead): a crash while loading the anchor or a preloaded package,  */
+/* say. Started again at once, it would most likely die again, over and     */
+/* over. So after a failed start the master starts no child for a while:   */
+/* 1 s, then twice as long after each failed start in a row, up to 60 s     */
+/* (the waits mod_orx keeps before it starts a dead host again). Children   */
+/* that die while the master already waits (siblings started together) do  */
+/* not make it wait longer; and after a failed start it starts one child at */
+/* a time. The first child that becomes ready ends it all.                  */
+#define START_FIRST_DELAY_MS  1000
+#define START_MAX_DELAY_MS   60000
+
+struct start_hold {
+    long long until;                /* no child starts before this (ms)     */
+    long long delay;                /* the last wait (ms); 0: none          */
+};
+
+/* A child died while starting: wait longer before the next one, unless     */
+/* the master is already waiting.                                           */
+static long long start_failed(start_hold &h, long long now)
+{
+    if (h.delay && now < h.until) return h.until - now;
+    h.delay = h.delay ? (h.delay * 2 > START_MAX_DELAY_MS ? START_MAX_DELAY_MS : h.delay * 2)
+                      : START_FIRST_DELAY_MS;
+    h.until = now + h.delay;
+    return h.delay;
+}
+
 static std::vector<std::string> g_preload;   /* --preload FILE, in order    */
 
 /* --plugin CLASS:PATH: load the plugin that serves a class of program, in */
@@ -1514,6 +1543,8 @@ int main(int argc, char **argv)
     pid_t master = getpid();
     long idle_since = -1;
     bool config_error = false;
+    start_hold hold = { 0, 0 };
+    std::vector<int> seen(max_procs, SLOT_EMPTY);   /* each slot, last tick  */
     while (!g_stop && !config_error) {
 #ifndef ORX_PDEATHSIG
         /* The keeper died (Linux sends a SIGTERM): drain.                  */
@@ -1521,17 +1552,31 @@ int main(int argc, char **argv)
 #endif
         int st; pid_t dead;
         while ((dead = waitpid(-1, &st, WNOHANG)) > 0) {
+            bool starting = false;
             for (int i = 0; i < max_procs; i++)
-                if (g_slots[i].pid == dead) { g_slots[i].pid = 0; slot_set(i, SLOT_EMPTY); }
+                if (g_slots[i].pid == dead) {
+                    starting = slot_get(i) == SLOT_STARTING;
+                    g_slots[i].pid = 0; slot_set(i, SLOT_EMPTY);
+                }
             /* A child that cannot start (its preload failed) would fail    */
             /* again in every replacement: stop, and say why on the way out. */
             if (WIFEXITED(st) && WEXITSTATUS(st) == EXIT_CONFIG) config_error = true;
+            else if (starting) {
+                long long d = start_failed(hold, now_ms());
+                fprintf(stderr, "oorexx-host: child %ld died while starting (%s %d); "
+                        "next start in %.1f s\n", (long)dead,
+                        WIFSIGNALED(st) ? "signal" : "status",
+                        WIFSIGNALED(st) ? WTERMSIG(st) : WEXITSTATUS(st), d / 1000.0);
+            }
         }
         if (config_error) break;
 
         int total = 0, ready = 0, idle = 0;
         for (int i = 0; i < max_procs; i++) {
             int s = slot_get(i);
+            /* A child that was starting is ready: starting works again.    */
+            if (seen[i] == SLOT_STARTING && (s == SLOT_IDLE || s == SLOT_BUSY)) hold.delay = 0;
+            seen[i] = s;
             if (s == SLOT_EMPTY) continue;
             total++;
             if (s == SLOT_IDLE) idle++;
@@ -1541,6 +1586,8 @@ int main(int argc, char **argv)
         int want = 0;
         if (total < min_procs) want = min_procs - total;
         else if (ready == 0 && total < max_procs) want = 1;
+        if (now_ms() < hold.until) want = 0;
+        if (hold.delay && want > 1) want = 1;        /* one at a time        */
         for (int i = 0; i < max_procs && want > 0; i++) {
             if (slot_get(i) != SLOT_EMPTY) continue;
             slot_set(i, SLOT_STARTING);
@@ -1551,6 +1598,7 @@ int main(int argc, char **argv)
             }
             if (p < 0) { slot_set(i, SLOT_EMPTY); break; }
             g_slots[i].pid = p;
+            seen[i] = SLOT_STARTING;
             want--;
         }
 
@@ -2014,26 +2062,38 @@ int main(int argc, char **argv)
     std::vector<HANDLE> procs(max_procs, (HANDLE)NULL);
     long long idle_since = -1;
     bool config_error = false;
+    start_hold hold = { 0, 0 };
+    std::vector<int> seen(max_procs, SLOT_EMPTY);   /* each slot, last tick  */
     for (;;) {
         for (int i = 0; i < max_procs; i++) {
             if (!procs[i] || WaitForSingleObject(procs[i], 0) != WAIT_OBJECT_0) continue;
             DWORD code = 0;
             GetExitCodeProcess(procs[i], &code);
             TRACE("master: child %lld ended, status %lld", (long long)g_slots[i].pid, (long long)code);
-            if (code != 0)
+            bool starting = slot_get(i) == SLOT_STARTING;
+            if (code != 0 && !(starting && code != EXIT_CONFIG))
                 fprintf(stderr, "oorexx-host: child %lu ended with status %lu\n",
                         g_slots[i].pid, code);
+            DWORD dead = g_slots[i].pid;
             CloseHandle(procs[i]); procs[i] = NULL;
             g_slots[i].pid = 0; slot_set(i, SLOT_EMPTY);
             /* A child that cannot start (its preload failed) would fail    */
             /* again in every replacement: stop, and say why on the way out. */
             if (code == EXIT_CONFIG) config_error = true;
+            else if (starting) {
+                long long d = start_failed(hold, now_ms());
+                fprintf(stderr, "oorexx-host: child %lu died while starting (status %lu); "
+                        "next start in %.1f s\n", dead, code, d / 1000.0);
+            }
         }
         if (config_error) break;
 
         int total = 0, ready = 0, idle = 0;
         for (int i = 0; i < max_procs; i++) {
             int s = slot_get(i);
+            /* A child that was starting is ready: starting works again.    */
+            if (seen[i] == SLOT_STARTING && (s == SLOT_IDLE || s == SLOT_BUSY)) hold.delay = 0;
+            seen[i] = s;
             if (s == SLOT_EMPTY) continue;
             total++;
             if (s == SLOT_IDLE) idle++;
@@ -2043,6 +2103,8 @@ int main(int argc, char **argv)
         int want = 0;
         if (total < min_procs) want = min_procs - total;
         else if (ready == 0 && total < max_procs) want = 1;
+        if (now_ms() < hold.until) want = 0;
+        if (hold.delay && want > 1) want = 1;        /* one at a time        */
         for (int i = 0; i < max_procs && want > 0; i++) {
             if (slot_get(i) != SLOT_EMPTY) continue;
             slot_set(i, SLOT_STARTING);
@@ -2055,6 +2117,7 @@ int main(int argc, char **argv)
             }
             procs[i] = h;
             g_slots[i].pid = pid;
+            seen[i] = SLOT_STARTING;
             TRACE("master: started child %lld in slot %lld", (long long)pid, i);
             want--;
         }

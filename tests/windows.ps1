@@ -337,6 +337,36 @@ Start-Sleep 3
 check 'stopping the service ends its hosts' (@(hosts).Count -eq 0) "($(pool))"
 & "$Apache\bin\httpd.exe" -k uninstall -n OrxTest 2>&1 | Out-Null
 
+# --- Children that die while starting: the master waits -------------------------
+# A standalone host whose preloaded package kills its own process while a
+# marker file exists: every child dies while it loads its anchor. The master
+# must not start them one after another (1 s, 2, 4... one at a time), and
+# must fill the pool again once they can start.
+$h = "$env:TEMP\orx-hold"
+New-Item -ItemType Directory -Force $h | Out-Null
+Remove-Item "$h\*" -Force -ErrorAction SilentlyContinue
+Set-Content -Encoding ascii "$h\broken" 'x'
+Set-Content -Encoding ascii "$h\flaky.rex" ("if SysFileExists('$h\broken') then " +
+    "Address SYSTEM 'taskkill /F /PID' SysQueryProcess('PID') '>NUL'")
+$env:OORX_TRACE = ''
+$hm = Start-Process "$Apache\bin\oorexx-host.exe" -NoNewWindow -PassThru `
+        -ArgumentList '--socket', "$h\s.sock", '--processes', '3', '--preload', "$h\flaky.rex" `
+        -RedirectStandardError "$h\err.txt"
+Start-Sleep 6
+$deaths = @(Select-String -Path "$h\err.txt" -Pattern 'died while starting').Count
+check 'children that die while starting are not started one after another' `
+      ($deaths -ge 3 -and $deaths -le 8) "($deaths in 6 s; $((Get-Content "$h\err.txt") -join ' | '))"
+Remove-Item "$h\broken"
+$n = 0
+for ($i = 0; $i -lt 20 -and $n -lt 3; $i++) {
+    Start-Sleep 1
+    $n = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($hm.Id)").Count
+}
+check 'once they can start, the pool fills again' ($n -ge 3) "($n children after $i s)"
+Stop-Process -Id $hm.Id -Force
+Start-Sleep 2
+Get-Process oorexx-host -ErrorAction SilentlyContinue | Stop-Process -Force
+
 # --- The error log -------------------------------------------------------------
 "--- requests ---"
 $trace
