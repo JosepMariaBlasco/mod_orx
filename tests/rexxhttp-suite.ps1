@@ -224,14 +224,19 @@ $sw = [Diagnostics.Stopwatch]::StartNew()
 Pop-Location
 "SUITE $Handler ran in $([Math]::Round($sw.Elapsed.TotalSeconds)) s"
 
+# The error log as the suite left it, before Apache goes: killing the tree
+# can take the host down before Apache's parent, whose module then logs the
+# host's death (seen once: "oorexx-host ... ended (status 1)").
+Start-Sleep 1
+$lines = @(Get-Content $log -ErrorAction SilentlyContinue)
+Copy-Item $log "$Out.error.log" -ErrorAction SilentlyContinue
+
 & taskkill.exe /F /T /PID $httpd.Id 2>&1 | Out-Null
 Get-Process httpd, oorexx-host -ErrorAction SilentlyContinue | Stop-Process -Force
 
 $text = Get-Content -Raw $Out
 $counts = ($text -split "`r?`n" | Where-Object { $_ -match '^(Tests ran|Assertions|Failures|Errors|Skipped files|Messages|Logged messages):' }) -join '; '
 "COUNTS $Handler $counts"
-$lines = @(Get-Content $log -ErrorAction SilentlyContinue)
-Copy-Item $log "$Out.error.log" -ErrorAction SilentlyContinue
 "ERRORLOG $Handler $($lines.Count) line(s)"
 $lines | Select-Object -First 15 | ForEach-Object { "  log: $_" }
 $ran = $text -match 'Tests ran:'
