@@ -25,10 +25,10 @@ call WWWLogReason r, 'the reason', '/the/file'
 call lineout , 'via lineout'
 return 0
 try:
-  signal on syntax
-  interpret 'x =' arg(1)
-  say arg(1) '-> ['||x||']'
-  return
-syntax:
-  say arg(1) '-> Error' condition('O')~code
+  do
+    interpret 'x =' arg(1)
+    say arg(1) '-> ['||x||']'
+  catch cond = syntax
+    say arg(1) '-> Error' cond~code
+  end
   return

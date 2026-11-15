@@ -73,12 +73,12 @@ call put 'syntax7', self_test('ADD URI x')
 return 1
 
 self_test:
-  signal on syntax name caught
-  Address APACHE arg(1)
-  return 'no condition'
-caught:
-  c = condition('O')
-  return c~code c~message~word(1) || '|' || (c~message~pos('APACHE:') > 0)
+  do
+    Address APACHE arg(1)
+    return 'no condition'
+  catch cond = syntax
+    return cond~code cond~message~word(1) || '|' || (cond~message~pos('APACHE:') > 0)
+  end
 
 ::requires 'lib.rex'
 EOF
@@ -112,13 +112,13 @@ Address APACHE
 "GET NEXT URI"; call put 'next', rc next_uri
 "GET NEXT PREV URI"; call put 'nextprev', rc next_prev_uri
 "GET NOTE from-authn"; call put 'lognote', rc note.['FROM-AUTHN']
-signal on syntax name caught
-"SET NOTE x y"
-call put 'logset', 'no condition'
+do
+  "SET NOTE x y"
+  call put 'logset', 'no condition'
+catch cond = syntax
+  call put 'logset', cond~code
+end
 return
-caught:
-  call put 'logset', condition('O')~code
-  return
 ::requires 'lib.rex'
 EOF
 chmod -R a+rX "$LAB" "$BIN"

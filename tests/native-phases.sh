@@ -94,12 +94,12 @@ if ret == .nil then return
 return ret
 
 try:
-  signal on syntax name refused
-  "SET" arg(1)~changeStr(':', ' ') 'x'
-  call lineout '$OUT', tag 'allowed' arg(1); call lineout '$OUT'
-  return
-refused:
-  call lineout '$OUT', tag 'refused' arg(1) condition('O')~code; call lineout '$OUT'
+  do
+    "SET" arg(1)~changeStr(':', ' ') 'x'
+    call lineout '$OUT', tag 'allowed' arg(1); call lineout '$OUT'
+  catch cond = syntax
+    call lineout '$OUT', tag 'refused' arg(1) cond~code; call lineout '$OUT'
+  end
   return
 EOF
 chmod -R a+rX "$LAB"; chmod 666 "$OUT"

@@ -135,10 +135,10 @@ inproc: procedure expose r
 show: say arg(1)'=['arg(2)']'; return
 
 try:
-  signal on syntax
-  interpret 'x =' arg(1)
-  call show arg(1), 'returned' x
-  return
-syntax:
-  call show arg(1), 'Error' condition('O')~code
+  do
+    interpret 'x =' arg(1)
+    call show arg(1), 'returned' x
+  catch cond = syntax
+    call show arg(1), 'Error' cond~code
+  end
   return
