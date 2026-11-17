@@ -8,6 +8,9 @@
  */
 
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN         /* windows.h (oorexxapi.h's) without    */
+                                    /* winsock.h: oorexx_protocol.h brings  */
+                                    /* winsock2.h in, and they clash        */
 #define _CRT_RAND_S                 /* rand_s, before anything brings stdlib.h in */
 #define _CRT_SECURE_NO_WARNINGS
 #endif
