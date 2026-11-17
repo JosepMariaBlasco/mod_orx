@@ -172,13 +172,12 @@ foreach ($first in $false, $true) {
     # tests/modrexx-phases.sh's cases.
     $cmd = "'$here/run-cases.sh' 8091 '$here/phases.cases' '$P/log/8091.log' rexx-handler '$P/doc' " +
            "| sed 's/rexx-handler/HANDLER/g' > '$tmp/orx-phases.out'; " +
-           "diff '$here/phases-rexx.expected' '$tmp/orx-phases.out' > '$tmp/orx-phases.diff'"
+           "diff -a '$here/phases-rexx.expected' '$tmp/orx-phases.out' > '$tmp/orx-phases.diff'"
     & $Bash -l -c $cmd 2>&1 | ForEach-Object { "  $_" }
     $same = $LASTEXITCODE -eq 0
     $cases = @(Select-String -Path "$env:TEMP\orx-phases.out" -Pattern '^== ' -ErrorAction SilentlyContinue).Count
     check "${tag}: every case of every phase as on Linux ($cases)" ($same -and $cases -gt 0)
-    if (-not $same) { Get-Content "$env:TEMP\orx-phases.diff" -TotalCount 60 | ForEach-Object { "  diff: $_" } }
-    if ($fails) { Get-Content $log -Tail 30 -ErrorAction SilentlyContinue | ForEach-Object { "  log: $_" } }
+    if (-not $same) { Get-Content "$env:TEMP\orx-phases.diff" -TotalCount 80 | ForEach-Object { "  diff: $_" } }
 }
 
 # --- Cleanup --------------------------------------------------------------
