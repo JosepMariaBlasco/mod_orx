@@ -28,6 +28,13 @@
  * mod_rexx's place, which the order of LoadModule decides (after mod_alias
  * and mod_mime, as a rule): the core's native hooks there run early, before
  * mod_alias and mod_mime, and naming the core would drag these along.
+ *
+ * On Windows the order of LoadModule does not decide: with the same modules
+ * loaded in the same order, RexxAuthzHandler ran before mod_auth_basic
+ * there and after it on Linux (measured). So there the hooks of those three
+ * phases name their predecessors: mod_alias, mod_mime and Apache's
+ * authentication modules, which is mod_rexx's place where modules load in
+ * the order of their names, as on Debian.
  */
 
 #include "httpd.h"
@@ -444,6 +451,15 @@ static void register_hooks(apr_pool_t *p)
     /* Before the core's own hooks, in every phase but Trans and Type (see   */
     /* the top).                                                             */
     static const char *const core[] = { "mod_orx.c", NULL };
+#ifdef _WIN32
+    static const char *const alias[] = { "mod_alias.c", NULL };
+    static const char *const mime[]  = { "mod_mime.c", NULL };
+    static const char *const authn[] = { "mod_auth_basic.c", "mod_auth_digest.c",
+                                         "mod_auth_form.c", NULL };
+#else
+    static const char *const *const alias = NULL, *const *const mime = NULL,
+                             *const *const authn = NULL;
+#endif
     (void)p;
     ap_hook_optional_fn_retrieve(retrieve, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_post_config(rx_post_config, NULL, core, APR_HOOK_MIDDLE);
@@ -451,12 +467,12 @@ static void register_hooks(apr_pool_t *p)
     /* At mod_rexx's positions: RexxAuthenHandler runs in auth_checker and  */
     /* RexxAuthzHandler in check_user_id, as under mod_rexx.                */
     ap_hook_post_read_request(rx_post_read, NULL, core, APR_HOOK_MIDDLE);
-    ap_hook_translate_name(rx_translate, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_translate_name(rx_translate, alias, NULL, APR_HOOK_MIDDLE);
     ap_hook_header_parser(rx_header_parser, NULL, core, APR_HOOK_MIDDLE);
     ap_hook_access_checker(rx_access, NULL, core, APR_HOOK_MIDDLE);
-    ap_hook_check_user_id(rx_authz, NULL, core, APR_HOOK_MIDDLE);
+    ap_hook_check_user_id(rx_authz, authn, core, APR_HOOK_MIDDLE);
     ap_hook_auth_checker(rx_authen, NULL, core, APR_HOOK_MIDDLE);
-    ap_hook_type_checker(rx_type, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_type_checker(rx_type, mime, NULL, APR_HOOK_MIDDLE);
     ap_hook_fixups(rx_fixup, NULL, core, APR_HOOK_MIDDLE);
     ap_hook_log_transaction(rx_log, NULL, core, APR_HOOK_MIDDLE);
 }

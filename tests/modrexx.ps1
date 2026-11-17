@@ -170,9 +170,20 @@ foreach ($first in $false, $true) {
     check "${tag}: checks.sh ran to its end" (@($out | Where-Object { "$_" -like '== checks.rex*' }).Count -gt 0) "(rc $rc)"
 
     # tests/modrexx-phases.sh's cases.
+    # Two cases answer differently on Windows: a program gives the request
+    # another file after Apache has looked at the first one, and Apache
+    # sends the new file with the old one's size. On Linux the client gets
+    # it (padded); on Windows, an empty reply. Of those two, only what the
+    # phase programs saw is compared. (The awk program is in a file: its
+    # quotes would not survive the way to bash.)
+    [IO.File]::WriteAllText("$env:TEMP\orx-phases.awk",
+        'BEGIN { s["== hp-file"]; s["== fixup-file"] } /^== / { skip = ($0 in s) } ' +
+        '!skip || /^== / || /^  phase: /' + "`n")
+    $only = "awk -f '$tmp/orx-phases.awk'"
     $cmd = "'$here/run-cases.sh' 8091 '$here/phases.cases' '$P/log/8091.log' rexx-handler '$P/doc' " +
-           "| sed 's/rexx-handler/HANDLER/g' > '$tmp/orx-phases.out'; " +
-           "diff -a '$here/phases-rexx.expected' '$tmp/orx-phases.out' > '$tmp/orx-phases.diff'"
+           "| sed 's/rexx-handler/HANDLER/g' | $only > '$tmp/orx-phases.out'; " +
+           "$only '$here/phases-rexx.expected' > '$tmp/orx-phases.expected'; " +
+           "diff -a '$tmp/orx-phases.expected' '$tmp/orx-phases.out' > '$tmp/orx-phases.diff'"
     & $Bash -l -c $cmd 2>&1 | ForEach-Object { "  $_" }
     $same = $LASTEXITCODE -eq 0
     $cases = @(Select-String -Path "$env:TEMP\orx-phases.out" -Pattern '^== ' -ErrorAction SilentlyContinue).Count

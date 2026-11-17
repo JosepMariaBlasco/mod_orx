@@ -610,8 +610,8 @@ Content-Type: text/plain
 HTTP/1.1 200 OK
 Content-Type: text/html
   body: HTTP/1.1 200 OK
-  body: Server: Apache/2.4.58 (Ubuntu)
   body: Content-Type: text/html
+  body: 
   phase: PostReadRequest|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
   phase: Trans|main=1|uri=/Content.rex|file=|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=0|wfile=|prev=(nil)|next=(nil)|main=(nil)
   phase: HeaderParser|main=1|uri=/Content.rex|file=/var/www/oorexx-phases/doc/Content.rex|handler=|ct=|user=|status=200|pi=|pt=/var/www/oorexx-phases/doc/|note=|env=|in=|stm=1|wfile=/var/www/oorexx-phases/doc/Content.rex|prev=(nil)|next=(nil)|main=(nil)

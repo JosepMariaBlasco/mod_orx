@@ -3,7 +3,8 @@
 # 127.0.0.1:PORT and print, for each one, what came back: status, the
 # headers that matter, the start of the body, the lines the phase programs
 # wrote to PHLOG, and the new lines of the error log (without their date,
-# process and client). The DOCTYPE of Apache's own error pages is cut short
+# process and client). A Date or Server header in the body (a HEAD shown
+# with curl -I) is left out. The DOCTYPE of Apache's own error pages is cut short
 # (it is not the same in every 2.4), and a request curl could not finish
 # says so. The same output from two servers means the same
 # behaviour. In the cases, @H@ is HANDLER and @D@ is DOCROOT. The error log
@@ -39,7 +40,7 @@ grep -v '^#' "$CASES" | grep -v '^ *$' | while read -r name path opts; do
     head -1 "$TMP/h" | tr -d '\r'
     grep -ai -E '^(content-type|location|www-authenticate|x-out-[a-z]*):' "$TMP/h" \
         | tr -d '\r' | sed "s/:$PORT\//:PORT\//" | sort
-    tr -d '\r' < "$TMP/b" | grep -av '^Date:' | head -3 | norm | cut -c1-100 \
+    tr -d '\r' < "$TMP/b" | grep -av '^Date:\|^Server:' | head -3 | norm | cut -c1-100 \
         | sed -e 's/^<!DOCTYPE HTML PUBLIC .*/<!DOCTYPE HTML PUBLIC ...>/' -e 's/^/  body: /'
     tr -d '\r' < "$PHLOG" | norm | sed 's/^/  phase: /'
     tail -n +$((before + 1)) "$LOG" | tr -d '\r' | grep -av 'AH00094\|AH00489\|AH00493' \
