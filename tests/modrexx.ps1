@@ -8,15 +8,14 @@
 #   tests\modrexx.ps1 -Apache C:\Apache24 -OoRexx C:\oorexx
 #
 # Built first with "build.cmd OOREXX APACHE modrexx". The checks themselves
-# are shell scripts (tests/modrexx/checks.sh and run-cases.sh), run under
-# Git for Windows' bash (-Bash says where it is). Listens on -Port and on
-# 8091. Prints one line per check, PASS or FAIL, and exits with the number
-# of failures.
+# are the Rexx programs the Linux tests run (tests/modrexx/run-checks.rex
+# and run-cases.rex), which need curl. Listens on -Port and on 8091. Prints
+# one line per check, PASS or FAIL, and exits with the number of failures.
 #
 # Copyright 2026 Josep Maria Blasco -- Apache License 2.0
 
 param([Parameter(Mandatory)][string]$Apache, [Parameter(Mandatory)][string]$OoRexx,
-      [int]$Port = 8097, [string]$Bash = "$env:ProgramFiles\Git\bin\bash.exe")
+      [int]$Port = 8097)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -30,7 +29,6 @@ function stop_apache {
     Start-Sleep 1
     Get-Process oorexx-host -ErrorAction SilentlyContinue | Stop-Process -Force
 }
-if (-not (Test-Path $Bash)) { "FAIL bash not found at $Bash (Git for Windows; -Bash)"; exit 1 }
 
 # --- Deploy ---------------------------------------------------------------
 Copy-Item "$repo\build\oorexx-host.exe" "$Apache\bin\oorexx-host.exe" -Force
@@ -43,7 +41,7 @@ $here = fwd "$repo\tests\modrexx"
 # What tests/modrexx.sh serves: the programs, at /modrexx.
 $lab = "$Apache\htdocs\modrexx"
 New-Item -ItemType Directory -Force $lab | Out-Null
-Copy-Item "$repo\tests\modrexx\*.rex" $lab -Force
+foreach ($n in 'probe', 'respond', 'checks') { Copy-Item "$repo\tests\modrexx\$n.rex" $lab -Force }
 [IO.File]::WriteAllText("$lab\static.txt", "hello`n")
 
 # What tests/modrexx-phases.sh serves on 8091: phase.rex once per phase.
@@ -141,7 +139,6 @@ $env:PATH = "$OoRexx;$env:PATH"      # the host finds rexx.dll there
 $env:ORX_ERROR_LOG = fwd $log
 # The expected answers have Linux's paths.
 $env:ORX_PATH_AS = "$P=/var/www/oorexx-phases"
-$tmp = fwd $env:TEMP
 
 foreach ($first in $false, $true) {
     $tag = if ($first) { 'layer first' } else { 'layer after' }
@@ -158,8 +155,7 @@ foreach ($first in $false, $true) {
           "($($hosts.Count) host processes)"
 
     # tests/modrexx.sh's checks.
-    [IO.File]::WriteAllText("$Apache\orx-phases\log\8091.log", '')
-    $out = & $Bash -l "$here/checks.sh" "http://127.0.0.1:$Port/modrexx" /modrexx (fwd $log) "$root/htdocs" $Port 2>&1
+    $out = & "$OoRexx\rexx.exe" "$here/run-checks.rex" "http://127.0.0.1:$Port/modrexx" /modrexx (fwd $log) "$root/htdocs" $Port 2>&1
     $rc = $LASTEXITCODE
     foreach ($l in $out) {
         $l = "$l"
@@ -167,28 +163,24 @@ foreach ($first in $false, $true) {
         elseif ($l -match '^\s+FAIL\s+(.*)$') { check "${tag}: $($Matches[1])" $false }
         else { "  $l" }
     }
-    check "${tag}: checks.sh ran to its end" (@($out | Where-Object { "$_" -like '== checks.rex*' }).Count -gt 0) "(rc $rc)"
+    check "${tag}: run-checks.rex ran to its end" (@($out | Where-Object { "$_" -like '== checks.rex*' }).Count -gt 0) "(rc $rc)"
 
-    # tests/modrexx-phases.sh's cases.
-    # Two cases answer differently on Windows: a program gives the request
-    # another file after Apache has looked at the first one, and Apache
-    # sends the new file with the old one's size. On Linux the client gets
-    # it (padded); on Windows, an empty reply. Of those two, only what the
-    # phase programs saw is compared. (The awk program is in a file: its
-    # quotes would not survive the way to bash.)
-    [IO.File]::WriteAllText("$env:TEMP\orx-phases.awk",
-        'BEGIN { s["== hp-file"]; s["== fixup-file"] } /^== / { skip = ($0 in s) } ' +
-        '!skip || /^== / || /^  phase: /' + "`n")
-    $only = "awk -f '$tmp/orx-phases.awk'"
-    $cmd = "'$here/run-cases.sh' 8091 '$here/phases.cases' '$P/log/8091.log' rexx-handler '$P/doc' " +
-           "| sed 's/rexx-handler/HANDLER/g' | $only > '$tmp/orx-phases.out'; " +
-           "$only '$here/phases-rexx.expected' > '$tmp/orx-phases.expected'; " +
-           "diff -a '$tmp/orx-phases.expected' '$tmp/orx-phases.out' > '$tmp/orx-phases.diff'"
-    & $Bash -l -c $cmd 2>&1 | ForEach-Object { "  $_" }
-    $same = $LASTEXITCODE -eq 0
-    $cases = @(Select-String -Path "$env:TEMP\orx-phases.out" -Pattern '^== ' -ErrorAction SilentlyContinue).Count
-    check "${tag}: every case of every phase as on Linux ($cases)" ($same -and $cases -gt 0)
-    if (-not $same) { Get-Content "$env:TEMP\orx-phases.diff" -TotalCount 400 | ForEach-Object { "  diff: $_" } }
+    # tests/modrexx-phases.sh's cases. Two of them answer differently on
+    # Windows: a program gives the request another file after Apache has
+    # looked at the first one, and Apache sends the new file with the old
+    # one's size. On Linux the client gets it (padded); on Windows, an empty
+    # reply. Of those two, only what the phase programs saw is compared.
+    $out = & "$OoRexx\rexx.exe" "$here/run-cases.rex" 8091 "$here/phases.cases" "$P/log/8091.log" rexx-handler `
+             "$P/doc" "$here/phases-rexx.expected" 'hp-file fixup-file' 2>&1
+    $rc = $LASTEXITCODE
+    $said = $false
+    foreach ($l in $out) {
+        $l = "$l"
+        if ($l -match '^\s+ok\s+(.*)$') { check "${tag}: $($Matches[1]), as on Linux" $true; $said = $true }
+        elseif ($l -match '^\s+FAIL\s+(.*)$') { check "${tag}: $($Matches[1])" $false; $said = $true }
+        else { "  diff: $l" }
+    }
+    check "${tag}: run-cases.rex ran to its end" $said "(rc $rc)"
 }
 
 # --- Cleanup --------------------------------------------------------------

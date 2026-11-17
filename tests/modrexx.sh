@@ -11,8 +11,8 @@
 #   checks.rex    what only mod_orx answers (checks.expected): bad handles,
 #                 functions not there yet, a POST that is not urlencoded
 #
-# The checks themselves are in tests/modrexx/checks.sh, which
-# tests/modrexx.ps1 runs on Windows too.
+# The checks themselves are a Rexx program, tests/modrexx/run-checks.rex,
+# which tests/modrexx.ps1 runs on Windows too.
 #
 # Run after tests/rexxhttp-suite.sh, which leaves Apache configured with
 # mod_orx (any MPM), and after make install-modrexx: it loads the mod_rexx
@@ -33,7 +33,7 @@ BASE=http://127.0.0.1$URL
 
 echo "== Setup"
 mkdir -p "$LAB"
-cp "$HERE"/modrexx/*.rex "$LAB/"
+for p in probe respond checks; do cp "$HERE/modrexx/$p.rex" "$LAB/"; done
 echo hello > "$LAB/static.txt"
 chmod -R a+rX "$LAB"
 {
@@ -49,7 +49,7 @@ a2enconf modrexx >/dev/null
 apachectl -k graceful; sleep 2
 : > "$LOG"
 
-sh "$HERE/modrexx/checks.sh" "$BASE" "$URL" "$LOG"
+rexx "$HERE/modrexx/run-checks.rex" "$BASE" "$URL" "$LOG"
 FAILS=$?
 
 echo "== Cleanup"

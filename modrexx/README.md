@@ -210,8 +210,8 @@ On Windows, `tests\modrexx.ps1 -Apache C:\Apache24 -OoRexx C:\ooRexx` is
 both tests: it deploys what `build.cmd ... modrexx` built into an Apache
 for Windows, with the modules Debian loads, and runs the same programs and
 the same cases against the same expected answers, once with the layer
-loaded after mod_orx and once before. The checks are the shell scripts the
-Linux tests use (`tests/modrexx/checks.sh`, `tests/modrexx/run-cases.sh`),
-run under Git for Windows' bash. Of the two cases Apache for Windows
-answers with an empty reply (above), only what the phase programs saw is
-compared. `.github/workflows/windows.yml` runs it on Windows Server 2022.
+loaded after mod_orx and once before. The checks are the Rexx programs the
+Linux tests run (`tests/modrexx/run-checks.rex`,
+`tests/modrexx/run-cases.rex`), which need only `curl`. Of the two cases
+Apache for Windows answers with an empty reply (above), only what the phase
+programs saw is compared. `.github/workflows/windows.yml` runs it on Windows Server 2022.

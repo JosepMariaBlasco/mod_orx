@@ -12,8 +12,8 @@
 # One program, tests/modrexx/phase.rex, is installed once per phase, with
 # the phase as its name; it logs what it sees and does what the request
 # header X-Act asks of it. tests/modrexx/phases.cases lists the requests;
-# tests/modrexx/run-cases.sh runs them and prints what came back, which is
-# compared with phases-rexx.expected.
+# tests/modrexx/run-cases.rex runs them and compares what came back with
+# phases-rexx.expected.
 #
 # Run after tests/rexxhttp-suite.sh, which leaves Apache configured with
 # mod_orx (any MPM), and after make install-modrexx: it loads the mod_rexx
@@ -35,7 +35,6 @@ DOC=$LAB/doc
 PROG=$LAB/prog
 LOGS=$LAB/log
 CONF=/etc/apache2/conf-available/oorexx-phases.conf
-TMP=$(mktemp -d)
 FAILS=0
 PHASES="PostReadRequest Trans HeaderParser Access Authen Authz Type Fixup Log"
 
@@ -102,25 +101,19 @@ layer_on
 a2enconf oorexx-phases >/dev/null
 apachectl -k graceful; sleep 2
 
-for run in "rexx 8091 rexx-handler"; do
-    set -- $run
-    echo "== The $1 set ($3)"
-    "$HERE/modrexx/run-cases.sh" "$2" "$HERE/modrexx/phases.cases" "$LOGS/$2.log" "$3" "$DOC" \
-        | sed "s/$3/HANDLER/g" > "$TMP/$1"
-    if [ "$UPDATE" = 1 ]; then
-        cp "$TMP/$1" "$HERE/modrexx/phases-$1.expected"; ok "phases-$1.expected rewritten"
-    elif diff "$HERE/modrexx/phases-$1.expected" "$TMP/$1" > "$TMP/diff"; then
-        ok "every case as expected ($(grep -c '^== ' "$TMP/$1"))"
-    else
-        fail "the $1 set:"; cat "$TMP/diff"
-    fi
-done
+echo "== The rexx set (rexx-handler)"
+CASES="$HERE/modrexx/run-cases.rex 8091 $HERE/modrexx/phases.cases $LOGS/8091.log rexx-handler $DOC"
+if [ "$UPDATE" = 1 ]; then
+    rexx $CASES > "$HERE/modrexx/phases-rexx.expected"; ok "phases-rexx.expected rewritten"
+else
+    rexx $CASES "$HERE/modrexx/phases-rexx.expected" || FAILS=$((FAILS + 1))
+fi
 
 echo "== Cleanup"
 a2disconf oorexx-phases >/dev/null
 layer_off
 rm -f "$CONF"
-rm -rf "$LAB" "$TMP"
+rm -rf "$LAB"
 apachectl -k graceful; sleep 1
 
 echo "== $FAILS failure(s)"
