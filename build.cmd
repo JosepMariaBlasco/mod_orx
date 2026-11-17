@@ -1,13 +1,16 @@
 @echo off
 rem mod_orx -- build the Apache module and the Rexx host on Windows, with MSVC.
 rem
-rem   build.cmd OOREXX APACHE
+rem   build.cmd OOREXX APACHE [modrexx]
 rem
 rem OOREXX is ooRexx's directory (the one with rexx.exe and api\), APACHE is
 rem Apache's (the one with bin\, include\ and lib\: Apache Lounge's build,
 rem say). The results go in build\: mod_orx.so, for Apache's modules\, and
 rem oorexx-host.exe, which mod_orx looks for, by default, in Apache's bin\
 rem (OoRexxHost says otherwise). Windows 10 1803 or Server 2019 at least.
+rem
+rem With modrexx, the optional mod_rexx layer too (modrexx\README.md):
+rem mod_orx_rexx.so and orx_rexx_plugin.dll, both for Apache's modules\.
 rem
 rem Copyright 2026 Josep Maria Blasco
 rem Licensed under the Apache License, Version 2.0 (see LICENSE).
@@ -46,3 +49,15 @@ cl /nologo /W3 /O2 /MD /LD /I"%AP%\include" /Fobuild\ module\mod_orx.c ^
    ws2_32.lib advapi32.lib /OUT:build\mod_orx.so || exit /b 1
 
 echo built build\mod_orx.so and build\oorexx-host.exe
+if /i not "%~3"=="modrexx" exit /b 0
+
+rem The mod_rexx layer: its module, like the core's, and the host's plugin,
+rem with the C runtime linked in, like the host.
+cl /nologo /W3 /O2 /MD /LD /I"%AP%\include" /Fobuild\ modrexx\mod_orx_rexx.c ^
+   /link "%AP%\lib\libhttpd.lib" "%AP%\lib\libapr-1.lib" "%AP%\lib\libaprutil-1.lib" ^
+   /OUT:build\mod_orx_rexx.so || exit /b 1
+cl /nologo /W3 /EHsc /O2 /MT /LD /I"%OO%\api" /Fobuild\ modrexx\orx_rexx_plugin.cpp ^
+   /link "%OO%\api\rexx.lib" "%OO%\api\rexxapi.lib" ^
+   /OUT:build\orx_rexx_plugin.dll || exit /b 1
+
+echo built build\mod_orx_rexx.so and build\orx_rexx_plugin.dll

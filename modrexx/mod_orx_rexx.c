@@ -38,6 +38,9 @@
 #include "http_request.h"
 #include "apr_strings.h"
 
+#include <errno.h>
+#include <string.h>
+
 #include "../include/oorexx_protocol.h"
 #include "../include/mod_orx.h"
 #include "../build/config.h"   /* ORX_REXX_PLUGIN, written by make */
@@ -410,7 +413,8 @@ MR_HOOK(log,           MR_LOG,           OORX_PHASE_LOG)
 static int rx_post_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptemp,
                           server_rec *s)
 {
-    (void)pconf; (void)plog; (void)ptemp;
+    const char *plugin;
+    (void)plog; (void)ptemp;
     /* Apache runs optional_fn_retrieve only after post_config (measured;   */
     /* server/main.c), but the core registers its functions when it is     */
     /* loaded, so they can be fetched here already.                         */
@@ -428,7 +432,10 @@ static int rx_post_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptemp
                      "(interface %d, mod_orx has %d)", ORX_MODULE_ABI, orx_abi());
         return HTTP_INTERNAL_SERVER_ERROR;
     }
-    orx_register_plugin(OORX_CLASS_MODREXX, ORX_REXX_PLUGIN);
+    /* A relative path (on Windows the default is one:                      */
+    /* modules/orx_rexx_plugin.dll) is relative to ServerRoot.              */
+    plugin = ap_server_root_relative(pconf, ORX_REXX_PLUGIN);
+    orx_register_plugin(OORX_CLASS_MODREXX, plugin ? plugin : ORX_REXX_PLUGIN);
     return OK;
 }
 

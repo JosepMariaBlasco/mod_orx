@@ -2,7 +2,7 @@ WWWReqRecUri() -> Error 40.1
 WWWReqRecUri("0x1234") -> Error 40.1
 WWWReqRecUri(s) -> Error 40.1
 WWWSrvRecPort(r) -> Error 40.1
-WWWSrvRecPort(s) -> [80]
+WWWSrvRecPort(s) -> [@PORT@]
 WWWCnxRecAborted(s) -> Error 40.1
 WWWCnxRecAborted(c) -> [0]
 WWWReqRecUri(r,) -> [/modrexx/checks.rex]

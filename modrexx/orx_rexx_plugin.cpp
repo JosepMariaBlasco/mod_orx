@@ -7,12 +7,19 @@
  * Licensed under the Apache License, Version 2.0 (see LICENSE).
  */
 
+#ifdef _WIN32
+#define _CRT_RAND_S                 /* rand_s, before anything brings stdlib.h in */
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #include <oorexxapi.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <strings.h>
+#endif
 #include <ctype.h>
 #include <time.h>
 
@@ -24,6 +31,14 @@ extern "C" {
 #include "../include/oorexx_protocol.h"
 }
 #include "../include/orx_host_plugin.h"
+
+#ifdef _WIN32
+#define strcasecmp  _stricmp
+#define strncasecmp _strnicmp
+#define ORX_EXPORT  __declspec(dllexport)
+#else
+#define ORX_EXPORT
+#endif
 
 /* ------------------------------------------------------------------------ */
 /* The modrexx class: programs written for mod_rexx (the mod_rexx layer)    */
@@ -101,11 +116,19 @@ static std::string tbl(int q, char t, const std::string &key, bool *found = NULL
 static std::string new_handle(void)
 {
     unsigned char b[8];
+#ifdef _WIN32
+    for (size_t i = 0; i < sizeof b; i++) {
+        unsigned int v;
+        if (rand_s(&v)) v = (unsigned int)rand();
+        b[i] = (unsigned char)v;
+    }
+#else
     FILE *f = fopen("/dev/urandom", "rb");
     if (!f || fread(b, 1, sizeof b, f) != sizeof b) {
         for (size_t i = 0; i < sizeof b; i++) b[i] = (unsigned char)rand();
     }
     if (f) fclose(f);
+#endif
     char h[24];
     snprintf(h, sizeof h, "orx:%02x%02x%02x%02x%02x%02x%02x%02x",
              b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
@@ -438,8 +461,14 @@ static int RexxEntry modrexx_fnc(RexxExitContext *c, int, int sub, PEXIT parm)
         char b[128];
         time_t now = time(NULL);
         struct tm tm;
+        /* %Z is what the C library has for the time zone: an abbreviation  */
+        /* on Unix ("CET"), usually its whole name on Windows.              */
+#ifdef _WIN32
+        localtime_s(&tm, &now);
+#else
         localtime_r(&now, &tm);
-        strftime(b, sizeof b, "%a %d %b %Y %T %Z", &tm);
+#endif
+        strftime(b, sizeof b, "%a %d %b %Y %H:%M:%S %Z", &tm);
         RET(b);
     }
     if (fn == "WWWREQRECNEXT" || fn == "WWWREQRECPREV" || fn == "WWWREQRECMAIN") {
@@ -501,6 +530,7 @@ static int rx_begin(int phase, const char *, orx_instance_policy *pol)
                                      /* a command fails (RC -3) instead of   */
                                      /* reaching a shell                     */
     pol->cwd = "/";                  /* Apache's directory, as under mod_rexx */
+                                     /* (on Windows, the root of its drive)   */
     pol->quiet_flush = 0;            /* mod_rexx could not flush             */
     pol->output_to_log = 0;          /* outside the content phase, the module */
                                      /* drops it                             */
@@ -516,7 +546,7 @@ static const orx_host_plugin rx_plugin = {
     ORX_PLUGIN_ABI, OORX_CLASS_MODREXX, rx_begin, rx_running, rx_end
 };
 
-extern "C" const orx_host_plugin *orx_plugin_init(const orx_host_api *api)
+extern "C" ORX_EXPORT const orx_host_plugin *orx_plugin_init(const orx_host_api *api)
 {
     if (!api || api->abi != ORX_PLUGIN_ABI) return NULL;
     rx_api = api;

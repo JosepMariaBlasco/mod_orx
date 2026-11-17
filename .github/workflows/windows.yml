@@ -1,6 +1,7 @@
 # mod_orx on Windows: build it with MSVC against Apache Lounge's Apache and
 # the ooRexx installer's API, and run tests/windows.ps1 (Apache with mod_orx,
-# serving Rexx CGI programs). Windows 10 1803 or Server 2019 at least.
+# serving Rexx CGI programs) and tests/modrexx.ps1 (the mod_rexx layer).
+# Windows 10 1803 or Server 2019 at least.
 
 name: Windows
 
@@ -10,8 +11,11 @@ on:
       - 'module/**'
       - 'host/**'
       - 'include/**'
+      - 'modrexx/**'
       - 'build.cmd'
       - 'tests/windows.ps1'
+      - 'tests/modrexx.ps1'
+      - 'tests/modrexx/**'
       - '.github/workflows/windows.yml'
   workflow_dispatch:
 
@@ -59,7 +63,7 @@ jobs:
 
       - name: Build
         shell: cmd
-        run: build.cmd "%OOREXX%" "%APACHE%"
+        run: build.cmd "%OOREXX%" "%APACHE%" modrexx
 
       - name: Apache with mod_orx
         shell: pwsh
@@ -74,4 +78,23 @@ jobs:
           $fails = @($lines | Where-Object { $_ -like 'FAIL*' })
           if ($fails.Count) { echo "::error title=mod_orx on Windows::$($fails -join '%0A')" }
           echo "::notice title=mod_orx on Windows::$($lines -join '%0A')"
+          exit $rc
+
+      - name: The mod_rexx layer
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          & tests\modrexx.ps1 -Apache $env:APACHE -OoRexx $env:OOREXX 2>&1 |
+              Tee-Object -FilePath "$env:RUNNER_TEMP\modrexx-test.txt"
+          $rc = $LASTEXITCODE
+          $out = Get-Content -Raw "$env:RUNNER_TEMP\modrexx-test.txt"
+          $all = $out -split "`n"
+          $fails = @($all | Where-Object { $_ -like 'FAIL*' })
+          $passed = @($all | Where-Object { $_ -like 'PASS*' }).Count
+          if ($fails.Count) {
+              $detail = @($all | Where-Object { $_ -match '^(FAIL|  diff:|  log:)' } | Select-Object -First 60)
+              echo "::error title=The mod_rexx layer on Windows::$(($detail -join '%0A') -replace '\r', '')"
+          }
+          echo "::notice title=The mod_rexx layer on Windows::$passed passed, $($fails.Count) failed"
           exit $rc
