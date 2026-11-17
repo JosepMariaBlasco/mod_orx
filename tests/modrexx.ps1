@@ -177,7 +177,7 @@ foreach ($first in $false, $true) {
     $same = $LASTEXITCODE -eq 0
     $cases = @(Select-String -Path "$env:TEMP\orx-phases.out" -Pattern '^== ' -ErrorAction SilentlyContinue).Count
     check "${tag}: every case of every phase as on Linux ($cases)" ($same -and $cases -gt 0)
-    if (-not $same) { Get-Content "$env:TEMP\orx-phases.diff" -TotalCount 80 | ForEach-Object { "  diff: $_" } }
+    if (-not $same) { Get-Content "$env:TEMP\orx-phases.diff" -TotalCount 400 | ForEach-Object { "  diff: $_" } }
 }
 
 # --- Cleanup --------------------------------------------------------------
