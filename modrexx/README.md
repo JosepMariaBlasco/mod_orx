@@ -10,8 +10,9 @@ It is two pieces, built only on the core's interfaces (see the main
 
 - `mod_orx_rexx.so`, an Apache module: mod_rexx's directives, its handler,
   and its hooks in every phase;
-- `orx_rexx_plugin.so`, a plugin of `oorexx-host`: the `WWW*` variables and
-  functions. The module tells mod_orx to have the host load it.
+- `orx_rexx_plugin.so` (on Windows, `orx_rexx_plugin.dll`), a plugin of
+  `oorexx-host`: the `WWW*` variables and functions. The module tells
+  mod_orx to have the host load it.
 
 ## Building and installing
 
@@ -22,6 +23,17 @@ make modrexx
 sudo make install-modrexx    # the plugin goes to PLUGINDIR, by default
                              # /usr/local/lib/mod_orx
 ```
+
+On Windows, `build.cmd` builds the layer too when its third argument is
+`modrexx`:
+
+```bat
+build.cmd C:\path\to\ooRexx C:\Apache24 modrexx
+```
+
+It leaves `mod_orx_rexx.so` and `orx_rexx_plugin.dll` in `build\`. Copy both
+to Apache's `modules\`, where the module tells the host to look for the
+plugin (`modules/orx_rexx_plugin.dll`, relative to `ServerRoot`).
 
 ## Configuring
 
@@ -45,6 +57,15 @@ modules, whose order the layer does not set, the order of `LoadModule`
 decides, as it did for mod_rexx. In the type checking phase, for one, a
 program sees only what `mod_mime` did not type if the layer is loaded after
 `mod_mime`, as on Debian, where modules load in the order of their names.
+
+On Windows the order of `LoadModule` does not decide: with the same
+modules loaded in the same order as on Debian, `RexxAuthzHandler` ran before
+`mod_auth_basic` there, and after it on Linux (measured). So on Windows the
+layer names its predecessors in the three phases where the place matters:
+`mod_alias` in the translation phase, `mod_mime` in the type checking phase,
+and Apache's authentication modules (`mod_auth_basic`, `mod_auth_digest`,
+`mod_auth_form`) in the authentication phase. That is mod_rexx's place on
+Debian, and what the rest of this page describes.
 
 mod_rexx itself cannot be loaded in the same Apache: the two define the
 same directives.
@@ -102,8 +123,9 @@ oddities:
 - Apache holds a small response until the end, so a status returned after
   some output still replaces it.
 - A `HEAD` request is answered without running the program.
-- The program runs in `/`, and a command goes to the environment `WWW`,
-  which does not exist (RC -3), not to a shell.
+- The program runs in `/` (on Windows, the root of Apache's drive), and a
+  command goes to the environment `WWW`, which does not exist (RC -3), not
+  to a shell.
 
 The differences:
 
@@ -149,6 +171,16 @@ The differences:
   they returned the request's pointer in binary, which no other function
   took (and their documentation gives the arguments in the wrong order).
 
+On Windows, two things are not as on Linux, and neither comes from the
+layer:
+
+- `WWWHTTP_time` ends with the time zone as the C library names it: an
+  abbreviation on Unix (`CET`), usually the whole name on Windows.
+- A program that gives the request another file after Apache has looked at
+  the first one (`WWWReqRecFilename` in the header parser or the fixup
+  phase, say) gets, on Linux, the new file sent with the old one's size;
+  on Windows, Apache sends an empty reply (measured).
+
 ## Testing
 
 Both tests run after `tests/rexxhttp-suite.sh` (see the main README) and
@@ -173,3 +205,13 @@ configuration:
 The answers are those of mod_rexx 2.4.0 itself, except where it crashed. A
 logging hook of the core (`OoRexxLogHook`) runs next to `RexxLogHandler` in
 every case, and its line must come after the mod_rexx program's.
+
+On Windows, `tests\modrexx.ps1 -Apache C:\Apache24 -OoRexx C:\ooRexx` is
+both tests: it deploys what `build.cmd ... modrexx` built into an Apache
+for Windows, with the modules Debian loads, and runs the same programs and
+the same cases against the same expected answers, once with the layer
+loaded after mod_orx and once before. The checks are the shell scripts the
+Linux tests use (`tests/modrexx/checks.sh`, `tests/modrexx/run-cases.sh`),
+run under Git for Windows' bash. Of the two cases Apache for Windows
+answers with an empty reply (above), only what the phase programs saw is
+compared. `.github/workflows/windows.yml` runs it on Windows Server 2022.

@@ -17,8 +17,8 @@ preloaded once per host process. Programs written for mod_rexx run
 unchanged, in every phase, with mod_rexx's own configuration, through an
 optional layer ([modrexx/README.md](modrexx/README.md)). mod_orx needs
 ooRexx 5.3.0, and stays in beta until 5.3.0 is released. It runs on Linux,
-macOS and Windows (10 1803 or Server 2019 at least; the mod_rexx layer is
-Unix only for now). Not for production yet.
+macOS and Windows (10 1803 or Server 2019 at least). Not for production
+yet.
 
 ## Design in one page
 
@@ -162,6 +162,9 @@ finds `rexx.dll` on the `PATH` Apache runs with: put ooRexx's folder there
 `Environment` value in the registry). Do not copy the DLLs beside the host:
 `rexx.dll` needs the rest of its folder, and a copy alone fails at once.
 Apache may run as a service.
+
+`build.cmd C:\path\to\ooRexx C:\Apache24 modrexx` builds the optional
+mod_rexx layer too: see [modrexx/README.md](modrexx/README.md).
 
 What differs from Unix (only the output of commands, below, is visible to
 programs):
@@ -527,8 +530,9 @@ runs it both ways; green is the same counts as on Linux, 0 failures, 0
 errors and an empty error log.
 
 The suite and these tests run without the mod_rexx layer. Its own
-tests, `tests/modrexx.sh` and `tests/modrexx-phases.sh`, load it for their
-run: see [modrexx/README.md](modrexx/README.md).
+tests, `tests/modrexx.sh` and `tests/modrexx-phases.sh` (on Windows,
+`tests/modrexx.ps1`), load it for their run: see
+[modrexx/README.md](modrexx/README.md).
 
 ## License
 
