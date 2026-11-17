@@ -96,9 +96,11 @@ return ret
 try:
   do
     "SET" arg(1)~changeStr(':', ' ') 'x'
-    call lineout '$OUT', tag 'allowed' arg(1); call lineout '$OUT'
+    call lineout '$OUT', tag 'allowed' arg(1)
   catch cond = syntax
-    call lineout '$OUT', tag 'refused' arg(1) cond~code; call lineout '$OUT'
+    call lineout '$OUT', tag 'refused' arg(1) cond~code
+  finally
+    call lineout '$OUT'
   end
   return
 EOF
