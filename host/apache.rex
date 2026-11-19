@@ -125,15 +125,25 @@ return
     levels["TRACE"i] = 7 + i
   end
 
+-- A misuse is thrown where it is found, at any depth (self~misuse), and
+-- becomes here a SYNTAX error of the program, at its command.
 ::method command
+  use arg command, caller
+  do
+    return self~run(command, caller)
+  catch misuse = user oorexxApacheMisuse
+    return caller~raise("SYNTAX", 93.900, .array~of("APACHE:" misuse~description))
+  end
+
+::method run private
   expose phase fields ops tables plurals writable levels
   use arg command, caller
   w = command~words
-  if w == 0 then return self~misuse(caller, "no command")
+  if w == 0 then self~misuse("no command")
   verb = command~word(1)~upper
-  if verb == "LOG" then return self~log(command, caller)
+  if verb == "LOG" then return self~log(command)
   if "GET SET ADD UNSET LIST"~wordPos(verb) == 0 then
-    return self~misuse(caller, "unknown command" command~word(1))
+    self~misuse("unknown command" command~word(1))
 
   -- Links to related requests, then the thing.
   i = 2; links = .array~new; prefix = ""
@@ -143,22 +153,22 @@ return
     prefix ||= command~word(i)~upper"_"
     i += 1
   end
-  if i > w then return self~misuse(caller, verb "of what?")
+  if i > w then self~misuse(verb "of what?")
   thing = command~word(i)~upper
   i += 1
   isField = fields~hasIndex(thing)
   if \isField, \tables~hasIndex(thing) then
-    return self~misuse(caller, "unknown field or table" command~word(i - 1))
+    self~misuse("unknown field or table" command~word(i - 1))
 
   -- Changes: only to the request itself, and where the phase allows them.
   if verb \== "GET", verb \== "LIST" then do
     if links~items > 0 then
-      return self~misuse(caller, "a related request cannot be changed")
+      self~misuse("a related request cannot be changed")
     if \isField then base = self~singular(thing); else base = thing
     allowed = writable[base]
     if allowed == .nil then allowed = ""
     if allowed~wordPos(phase) == 0 then
-      return self~misuse(caller, base "cannot be changed in the" phase "phase")
+      self~misuse(base "cannot be changed in the" phase "phase")
   end
 
   -- The request the command is about.
@@ -170,8 +180,7 @@ return
 
   if isField then select case verb
     when "GET" then do
-      target = self~into(command, i, caller)
-      if target == .nil then return 0       -- a misuse, already raised
+      target = self~into(command, i)
       if target == "" then target = prefix || thing
       if thing == "PHASE" then value = phase
       else do
@@ -196,13 +205,13 @@ return
       call oorx_update ops[thing], "", value
       return 0
     end
-    otherwise return self~misuse(caller, verb "is for tables, and" thing "is a field")
+    otherwise self~misuse(verb "is for tables, and" thing "is a field")
   end
 
   -- A table.
   letter = tables[thing]
   if verb == "LIST" then do
-    if i < w then return self~misuse(caller, "LIST" thing "takes one key at most")
+    if i < w then self~misuse("LIST" thing "takes one key at most")
     key = command~word(i)
     if caller~isRedirected("Output") then out = caller~output
     else out = .output
@@ -217,13 +226,12 @@ return
     end
     return 0
   end
-  if i > w then return self~misuse(caller, verb thing "needs a key")
+  if i > w then self~misuse(verb thing "needs a key")
   key = command~word(i)
   i += 1
   select case verb
     when "GET" then do
-      target = self~into(command, i, caller)
-      if target == .nil then return 0
+      target = self~into(command, i)
       values = oorx_entries(q, letter, key)
       if target \== "" then do
         if values~items == 0 then do
@@ -240,7 +248,7 @@ return
       return 0
     end
     when "UNSET" then do
-      if i <= w then return self~misuse(caller, "UNSET" thing key "takes no value")
+      if i <= w then self~misuse("UNSET" thing key "takes no value")
       call oorx_update "u"letter, key, ""
       return 0
     end
@@ -260,11 +268,11 @@ return
 -- LOG level message: the message is the rest of the line.
 ::method log private
   expose levels
-  use arg command, caller
+  use arg command
   level = command~word(2)~upper
   if \levels~hasIndex(level) then
-    return self~misuse(caller, "LOG needs a level: emerg alert crit error warn" -
-                       "notice info debug trace1..trace8")
+    self~misuse("LOG needs a level: emerg alert crit error warn" -
+                "notice info debug trace1..trace8")
   call oorx_logl levels[level], self~rest(command, 3)
   return 0
 
@@ -301,19 +309,17 @@ return
   return 1
 
 -- After GET's thing (and key): nothing, or INTO var. Returns the variable,
--- "" for none, or .nil after raising SYNTAX.
+-- or "" for none.
 ::method into private
-  use arg command, i, caller
+  use arg command, i
   w = command~words
   if i > w then return ""
   if i + 1 == w, command~word(i)~upper == "INTO" then do
     var = command~word(i + 1)
     if var~dataType("V"), "0123456789."~pos(var~left(1)) == 0 then return var
-    self~misuse(caller, "INTO needs the name of a variable:" var)
-    return .nil
+    self~misuse("INTO needs the name of a variable:" var)
   end
-  self~misuse(caller, "unexpected:" command~subWord(i))
-  return .nil
+  self~misuse("unexpected:" command~subWord(i))
 
 -- The value: the rest of the line after word i - 1 and one blank, as it is.
 ::method rest private
@@ -334,6 +340,8 @@ return
   use arg value
   return value~verify(xrange("00"x, "08"x) || xrange("0A"x, "1F"x) || "7F"x, "M") > 0
 
+-- A misuse of the environment. Does not return: the condition leaves every
+-- method on its way to command, which catches it.
 ::method misuse private
-  use arg caller, message
-  return caller~raise("SYNTAX", 93.900, .array~of("APACHE:" message))
+  use arg message
+  throw user oorexxApacheMisuse description (message)
