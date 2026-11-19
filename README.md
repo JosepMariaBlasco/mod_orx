@@ -118,13 +118,16 @@ file type for Oryx, the internal product name of what became ooRexx.
 Requirements:
 
 - Apache 2.4 with `apxs` (Debian/Ubuntu: `apache2-dev`);
-- ooRexx 5.3.0 (r13535 or later) with its API headers: the `APACHE`
-  environment of native programs is a `.CommandHandler`, new in 5.3.0,
-  and r13535 has the fixes mod_orx's tests run against (among them
-  [#2135](https://sourceforge.net/p/oorexx/bugs/2135/): before it, an
-  Apache started from another user's session, with that user's
-  `XDG_RUNTIME_DIR`, made every new interpreter wait about 2 s for `rxapi`)
-  and the CATCH and FINALLY clauses the tests are written with;
+- ooRexx 5.3.0 (r13550 or later) with its API headers: the `APACHE`
+  environment of native programs is a `.CommandHandler`, new in 5.3.0, and
+  it is written with the THROW instruction, as the tests are with the CATCH
+  and FINALLY clauses; r13550 also has the fixes the tests run against
+  (among them [#2135](https://sourceforge.net/p/oorexx/bugs/2135/): before
+  it, an Apache started from another user's session, with that user's
+  `XDG_RUNTIME_DIR`, made every new interpreter wait about 2 s for
+  `rxapi`). While the builds at SourceForge are older than that, build
+  ooRexx from its
+  [trunk](https://sourceforge.net/p/oorexx/code-0/HEAD/tree/main/trunk/);
 - a C and a C++ compiler.
 
 ```sh
@@ -443,6 +446,25 @@ Where they run:
   a redirect or a subrequest whose configuration is that of the request
   before it, and takes its user.
 - They do not read the request body: `.input` is empty.
+
+### What a program leaves uncaught
+
+When a program ends with a condition that nothing caught, the host does what
+`rexx` does, and the error log has one line for it, with the program, the
+line and, when the line is not the program's own, the file it is in (a
+package the program requires):
+
+- a SYNTAX error is the error:
+  `prog.rex: line 12: Error 42: Arithmetic overflow/underflow.: ...`;
+- a condition thrown with THROW, whatever its name, is error 4, as `rexx`
+  reports it, with the condition's name and, if it has one, its description:
+  `prog.rex: line 4 of /srv/app/config.cls: Error 4: Program interrupted.:
+  Program interrupted with USER BADCONFIG condition: no '=' in port 80.`;
+- a condition raised with RAISE, and not thrown, is no error: nobody trapped
+  it, the program has ended, and nothing is logged.
+
+An error is a 500 in a provider or a hook; a CGI program's response is what
+it had written.
 
 ### Debugging the host
 
