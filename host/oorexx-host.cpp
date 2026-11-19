@@ -875,6 +875,77 @@ RexxRoutine2(int, oorx_logl, wholenumber_t, level, RexxStringObject, s)
 }
 
 /* ------------------------------------------------------------------------ */
+/* A condition that Rexx code left to the host                              */
+/* ------------------------------------------------------------------------ */
+
+/* What rexx would say of it. An error (SYNTAX) is itself. A condition      */
+/* thrown with THROW that nothing caught is error 4.1, "Program interrupted */
+/* with condition condition.", or 4.901, which ends with its description,   */
+/* when that is a string and not a null one: rexx says so at the base of a  */
+/* program, but the API hands the condition over as it was thrown, and the  */
+/* host has to say it (measured, ooRexx r13550). Any other condition was    */
+/* raised with RAISE and trapped by nobody, which is no error: rexx says    */
+/* nothing and ends with 0.                                                 */
+struct uncaught {
+    bool error;             /* an error, or a thrown condition              */
+    int rc;                 /* the error's number                           */
+    int line;               /* where it was raised or thrown...             */
+    std::string program;    /* ...and in which file ("" if not known)       */
+    std::string name;       /* the condition: SYNTAX, USER BADCONFIG...     */
+    std::string text;       /* the error's text and its message             */
+};
+
+static uncaught uncaught_condition(RexxThreadContext *tc, RexxDirectoryObject ci)
+{
+    uncaught u;
+    u.error = false; u.rc = 0; u.line = 0;
+    if (ci == NULLOBJECT) return u;
+    RexxCondition c;
+    tc->DecodeConditionInfo(ci, &c);
+    u.line = (int)c.position;
+    if (c.program != NULLOBJECT) u.program = tc->CString(c.program);
+    if (c.conditionName != NULLOBJECT) u.name = tc->CString(c.conditionName);
+    if (u.name == "SYNTAX") {
+        u.error = true;
+        u.rc = (int)c.rc;
+        if (c.errortext != NULLOBJECT) u.text = tc->CString(c.errortext);
+        if (c.message != NULLOBJECT) {
+            if (!u.text.empty()) u.text += ": ";
+            u.text += tc->CString(c.message);
+        }
+        return u;
+    }
+    RexxObjectPtr thrown = tc->DirectoryAt(ci, "THROWN");
+    if (thrown == NULLOBJECT || thrown != tc->True()) return u;
+    u.error = true;
+    u.rc = 4;
+    u.text = "Program interrupted.: Program interrupted with " + u.name + " condition";
+    RexxObjectPtr d = tc->DirectoryAt(ci, "DESCRIPTION");
+    if (d != NULLOBJECT && tc->IsString(d) && tc->StringLength((RexxStringObject)d) > 0) {
+        u.text += ": ";
+        u.text.append(tc->StringData((RexxStringObject)d), tc->StringLength((RexxStringObject)d));
+    }
+    u.text += ".";
+    return u;
+}
+
+/* The same file? (Windows: whatever the case and the slashes.)             */
+static bool same_file(const std::string &a, const std::string &b)
+{
+#ifdef _WIN32
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); i++) {
+        char x = a[i] == '\\' ? '/' : (char)tolower((unsigned char)a[i]);
+        char y = b[i] == '\\' ? '/' : (char)tolower((unsigned char)b[i]);
+        if (x != y) return false;
+    }
+    return true;
+#else
+    return a == b;
+#endif
+}
+
+/* ------------------------------------------------------------------------ */
 /* Serving one connection                                                   */
 /* ------------------------------------------------------------------------ */
 
@@ -1047,15 +1118,13 @@ static void serve(oorx_sock_t fd)
         if (env == NULLOBJECT || tc->CheckCondition() ||
             (tc->CallRoutine(env, tc->ArrayOfTwo(g_apache_class, tc->WholeNumber(phase))),
              tc->CheckCondition())) {
-            RexxCondition c;
-            RexxDirectoryObject ci = tc->GetConditionInfo();
+            uncaught u = uncaught_condition(tc, tc->GetConditionInfo());
             std::string m = "oorexx-host: the APACHE environment failed";
-            if (ci != NULLOBJECT) {
-                tc->DecodeConditionInfo(ci, &c);
+            if (u.error) {
                 char n[64];
-                snprintf(n, sizeof n, ": line %d: Error %d", (int)c.position, (int)c.rc);
+                snprintf(n, sizeof n, ": line %d: Error %d", u.line, u.rc);
                 m += n;
-                if (c.message != NULLOBJECT) { m += ": "; m += tc->CString(c.message); }
+                if (!u.text.empty()) { m += ": "; m += u.text; }
             }
             send_log(OORX_LOG_ERR, m.data(), m.size());
             /* Close the program's output, or the pump never sees its end.  */
@@ -1095,22 +1164,30 @@ static void serve(oorx_sock_t fd)
             }
         }
         if (tc->CheckCondition()) {
-            /* An uncaught condition: what a CGI would print on stderr.     */
-            RexxCondition c;
-            tc->DecodeConditionInfo(tc->GetConditionInfo(), &c);
-            std::string m = "oorexx-host: ";
-            m += program;
-            char line[64];
-            snprintf(line, sizeof line, ": line %d: Error %d", (int)c.position, (int)(c.rc));
-            m += line;
-            if (c.errortext != NULLOBJECT) { m += ": "; m += tc->CString(c.errortext); }
-            if (c.message != NULLOBJECT)   { m += ": "; m += tc->CString(c.message); }
-            if (halted) m += " (phase timeout)";
+            /* An uncaught condition: what a CGI would print on stderr, and  */
+            /* nothing if it was raised and not thrown.                      */
+            uncaught u = uncaught_condition(tc, tc->GetConditionInfo());
             tc->ClearCondition();
-            send_log(OORX_LOG_ERR, m.data(), m.size());
-            /* A CGI's failure shows in its output; a hook's is its verdict; */
-            /* a plugin's program's, a 500 (mod_rexx's did the same).        */
-            if (hook || plugin) { status = 500; has_value = false; }
+            if (u.error) {
+                std::string m = "oorexx-host: ";
+                m += program;
+                char line[64];
+                snprintf(line, sizeof line, ": line %d", u.line);
+                m += line;
+                /* The line is another file's: a package the program requires. */
+                if (!u.program.empty() && !same_file(u.program, program)) {
+                    m += " of "; m += u.program;
+                }
+                snprintf(line, sizeof line, ": Error %d", u.rc);
+                m += line;
+                if (!u.text.empty()) { m += ": "; m += u.text; }
+                if (halted) m += " (phase timeout)";
+                send_log(OORX_LOG_ERR, m.data(), m.size());
+                /* A CGI's failure shows in its output; a hook's is its      */
+                /* verdict; a plugin's program's, a 500 (mod_rexx's did the  */
+                /* same).                                                    */
+                if (hook || plugin) { status = 500; has_value = false; }
+            }
         }
         /* Close the program's output: flushes what the stream still holds. */
         tc->SendMessage0(out, "CLOSE");
@@ -1292,21 +1369,21 @@ static void load_anchor(void)
             tc->RequestGlobalReference(g_apache_class);
     }
     if (r == NULLOBJECT || g_apache_class == NULLOBJECT || tc->CheckCondition()) {
-        RexxCondition c;
         std::string m = g_preload.empty() ? "oorexx-host: the anchor instance failed"
                                           : "oorexx-host: OoRexxPreload failed";
-        RexxDirectoryObject ci = tc->GetConditionInfo();
-        if (ci != NULLOBJECT) {
-            tc->DecodeConditionInfo(ci, &c);
+        uncaught u = uncaught_condition(tc, tc->GetConditionInfo());
+        if (u.error) {
             char n[64];
-            snprintf(n, sizeof n, ": Error %d", (int)c.rc);
+            snprintf(n, sizeof n, ": Error %d", u.rc);
             m += n;
-            if (c.program != NULLOBJECT) {
-                snprintf(n, sizeof n, " at line %d", (int)c.position);
-                m += " in "; m += tc->CString(c.program); m += n;
+            if (!u.program.empty()) {
+                snprintf(n, sizeof n, " at line %d", u.line);
+                m += " in "; m += u.program; m += n;
             }
-            if (c.errortext != NULLOBJECT) { m += ": "; m += tc->CString(c.errortext); }
-            if (c.message != NULLOBJECT)   { m += ": "; m += tc->CString(c.message); }
+            if (!u.text.empty()) { m += ": "; m += u.text; }
+        } else if (!u.name.empty()) {
+            /* Raised, not thrown: it left the preload with no result.      */
+            m += ": a "; m += u.name; m += " condition was raised";
         }
         m += "\n";
         err_write(m);

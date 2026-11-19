@@ -88,6 +88,12 @@ say 'first'
 call SysSleep 1.5
 say 'second'
 '@
+Set-Content -Encoding ascii "$cgi\thrown.rex" @'
+say 'Content-Type: text/plain'
+say ''
+say 'before'
+throw user badConfig description "no port"
+'@
 Set-Content -Encoding ascii "$cgi\broken.rex" @'
 say 'Content-Type: text/plain'
 say ''
@@ -224,6 +230,11 @@ $r = get '/rexx/broken.rex'
 Start-Sleep 1
 $logtext = Get-Content $log -Raw
 check 'a syntax error is logged' ($logtext -match 'broken\.rex: line 4: Error 35') "[$($r.code)]"
+$r = get '/rexx/thrown.rex'
+Start-Sleep 1
+$logtext = Get-Content $log -Raw
+check 'a condition thrown and not caught is logged as rexx reports it' `
+    ($logtext -match 'thrown\.rex: line 4: Error 4: Program interrupted\.: Program interrupted with USER BADCONFIG condition: no port\.') "[$($r.code)]"
 $sw = [Diagnostics.Stopwatch]::StartNew()
 $r = get '/rexx/loop.rex'
 $secs = $sw.Elapsed.TotalSeconds
@@ -373,7 +384,7 @@ $trace
 "--- error log ---"
 Get-Content $log | Where-Object { $_ -notmatch 'trace: .* poll: ' } | Select-Object -Last 150
 $unexpected = Get-Content $log | Where-Object {
-    $_ -match '\[(error|crit|alert|emerg)\]' -and $_ -notmatch 'broken\.rex|loop\.rex|ended \(status|ScriptAlias' }
+    $_ -match '\[(error|crit|alert|emerg)\]' -and $_ -notmatch 'broken\.rex|thrown\.rex|loop\.rex|ended \(status|ScriptAlias' }
 check 'no unexpected errors in the log' ($unexpected.Count -eq 0) ($unexpected -join ' | ')
 
 "RESULT $fails failure(s)"

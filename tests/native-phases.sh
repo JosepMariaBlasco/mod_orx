@@ -88,6 +88,8 @@ do w over act~subWords
     when 'log'    then "LOG" v 'hello from' tag
     when 'try'    then call try v
     when 'boom'   then x = 1 / 0
+    when 'throw'  then call refuse
+    when 'raise'  then raise user refused description 'only raised'
   end
 end
 if ret == .nil then return
@@ -103,6 +105,9 @@ try:
     call lineout '$OUT'
   end
   return
+
+refuse:
+  throw user refused description ('said no in' tag)
 EOF
 chmod -R a+rX "$LAB"; chmod 666 "$OUT"
 
@@ -178,6 +183,12 @@ check "  and why"                          "$(logged 'returned "abc"; expected 1
 req /s.txt "Fixup.boom=1"
 check "an error in the program: 500"       "$CODE" 500
 check "  and the error"                    "$(logged 'Error 42')" 1
+req /s.txt "Fixup.throw=1"
+check "a condition thrown and not caught: 500" "$CODE" 500
+check "  and the error, with its description" \
+      "$(logged 'phase.rex: line [0-9]*: Error 4: Program interrupted.: Program interrupted with USER REFUSED condition: said no in Fixup\.$')" 1
+req /s.txt "Fixup.raise=1"
+check "a condition raised, not thrown: no error" "$CODE $(logged 'phase.rex')" "200 0"
 req /s.txt "Fixup.ret=302"
 check "a 3xx without Location: 500"        "$CODE" 500
 check "  and why"                          "$(logged 'returned 302 without a Location')" 1

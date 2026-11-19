@@ -82,6 +82,25 @@ say 'Content-Type: text/plain'
 say ''
 say 'hello'
 EOF
+cat > "$T/htdocs/config.cls" <<'EOF'
+::routine parseLine public
+  use arg line
+  if pos('=', line) == 0 then
+    throw user badConfig description ("no '=' in" line)
+EOF
+cat > "$T/htdocs/thrown.rex" <<'EOF'
+say 'Content-Type: text/plain'
+say ''
+say 'before'
+call parseLine 'port 80'
+::requires 'config.cls'
+EOF
+cat > "$T/htdocs/raised.rex" <<'EOF'
+say 'Content-Type: text/plain'
+say ''
+say 'served'
+raise user badConfig description 'raised, not thrown'
+EOF
 cat > "$T/htdocs/slow.rex" <<EOF
 say 'Content-Type: text/plain'
 say ''
@@ -100,6 +119,15 @@ sleep 3
 
 echo "== A Rexx CGI through mod_orx"
 check "it is served" "$(curl -s -m 20 "$URL/hello.rex")" hello
+
+echo "== A condition the program leaves uncaught"
+check "thrown (THROW), in a package it requires: what it had said is served" \
+      "$(curl -s -m 20 "$URL/thrown.rex")" before
+sleep 1
+check "  and it is logged as rexx reports it, where it was thrown" \
+      "$(grep -c "thrown\.rex: line 4 of .*/config\.cls: Error 4: Program interrupted\.: Program interrupted with USER BADCONFIG condition: no '=' in port 80\.\$" "$T/error.log")" 1
+check "raised (RAISE), not thrown: it is no error" \
+      "$(curl -s -m 20 "$URL/raised.rex") $(sleep 1; grep -c 'raised\.rex.*Error' "$T/error.log")" "served 0"
 
 echo "== Apache's parent dies (kill -9), with a program running"
 P=$(cat "$T/httpd.pid")
@@ -133,7 +161,7 @@ done
 sleep 1
 ps -eo args= > "$T/ps"
 check "nothing of this Apache is left" "$(grep -c -F "$T/httpd.conf" "$T/ps" | tr -d ' ')" 0
-grep -E '\[(orx|core|mpm_[a-z]+):(error|crit|emerg)' "$T/error.log" | sed 's/^/        /'
+grep -E '\[(orx|core|mpm_[a-z]+):(error|crit|emerg)' "$T/error.log" | grep -v 'thrown\.rex' | sed 's/^/        /'
 rm -rf "$T"
 echo "== $FAILS failure(s)"
 [ $FAILS = 0 ]
