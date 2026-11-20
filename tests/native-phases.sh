@@ -188,7 +188,9 @@ check "a condition thrown and not caught: 500" "$CODE" 500
 check "  and the error, with its description" \
       "$(logged 'phase.rex: line [0-9]*: Error 4: Program interrupted.: Program interrupted with USER REFUSED condition: said no in Fixup\.$')" 1
 req /s.txt "Fixup.raise=1"
-check "a condition raised, not thrown: no error" "$CODE $(logged 'phase.rex')" "200 0"
+check "a condition raised, not thrown: no error" "$CODE $(logged 'Error')" "200 0"
+check "  and a warning" \
+      "$(logged 'orx:warn.*phase.rex: line [0-9]*: condition USER REFUSED raised and not trapped (ignored): only raised$')" 1
 req /s.txt "Fixup.ret=302"
 check "a 3xx without Location: 500"        "$CODE" 500
 check "  and why"                          "$(logged 'returned 302 without a Location')" 1

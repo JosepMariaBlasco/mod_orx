@@ -461,7 +461,10 @@ package the program requires):
   `prog.rex: line 4 of /srv/app/config.cls: Error 4: Program interrupted.:
   Program interrupted with USER BADCONFIG condition: no '=' in port 80.`;
 - a condition raised with RAISE, and not thrown, is no error: nobody trapped
-  it, the program has ended, and nothing is logged.
+  it, and the program has ended as if it had returned nothing. The log has a
+  warning, in case it was meant to be thrown:
+  `prog.rex: line 9: condition USER BADCONFIG raised and not trapped
+  (ignored): ...`, with its description if it has one.
 
 An error is a 500 in a provider or a hook; a CGI program's response is what
 it had written.

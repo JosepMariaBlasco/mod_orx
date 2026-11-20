@@ -885,7 +885,8 @@ RexxRoutine2(int, oorx_logl, wholenumber_t, level, RexxStringObject, s)
 /* program, but the API hands the condition over as it was thrown, and the  */
 /* host has to say it (measured, ooRexx r13550). Any other condition was    */
 /* raised with RAISE and trapped by nobody, which is no error: rexx says    */
-/* nothing and ends with 0.                                                 */
+/* nothing and ends with 0. The host says it as a warning, for whoever      */
+/* meant to throw it.                                                       */
 struct uncaught {
     bool error;             /* an error, or a thrown condition              */
     int rc;                 /* the error's number                           */
@@ -893,6 +894,7 @@ struct uncaught {
     std::string program;    /* ...and in which file ("" if not known)       */
     std::string name;       /* the condition: SYNTAX, USER BADCONFIG...     */
     std::string text;       /* the error's text and its message             */
+    std::string description;/* the condition's, if a string and not null    */
 };
 
 static uncaught uncaught_condition(RexxThreadContext *tc, RexxDirectoryObject ci)
@@ -915,16 +917,16 @@ static uncaught uncaught_condition(RexxThreadContext *tc, RexxDirectoryObject ci
         }
         return u;
     }
+    RexxObjectPtr d = tc->DirectoryAt(ci, "DESCRIPTION");
+    if (d != NULLOBJECT && tc->IsString(d))
+        u.description.assign(tc->StringData((RexxStringObject)d),
+                             tc->StringLength((RexxStringObject)d));
     RexxObjectPtr thrown = tc->DirectoryAt(ci, "THROWN");
     if (thrown == NULLOBJECT || thrown != tc->True()) return u;
     u.error = true;
     u.rc = 4;
     u.text = "Program interrupted.: Program interrupted with " + u.name + " condition";
-    RexxObjectPtr d = tc->DirectoryAt(ci, "DESCRIPTION");
-    if (d != NULLOBJECT && tc->IsString(d) && tc->StringLength((RexxStringObject)d) > 0) {
-        u.text += ": ";
-        u.text.append(tc->StringData((RexxStringObject)d), tc->StringLength((RexxStringObject)d));
-    }
+    if (!u.description.empty()) { u.text += ": "; u.text += u.description; }
     u.text += ".";
     return u;
 }
@@ -1168,16 +1170,22 @@ static void serve(oorx_sock_t fd)
             /* nothing if it was raised and not thrown.                      */
             uncaught u = uncaught_condition(tc, tc->GetConditionInfo());
             tc->ClearCondition();
-            if (u.error) {
-                std::string m = "oorexx-host: ";
-                m += program;
-                char line[64];
-                snprintf(line, sizeof line, ": line %d", u.line);
-                m += line;
-                /* The line is another file's: a package the program requires. */
-                if (!u.program.empty() && !same_file(u.program, program)) {
-                    m += " of "; m += u.program;
-                }
+            std::string m = "oorexx-host: ";
+            m += program;
+            char line[64];
+            snprintf(line, sizeof line, ": line %d", u.line);
+            m += line;
+            /* The line is another file's: a package the program requires.  */
+            if (!u.program.empty() && !same_file(u.program, program)) {
+                m += " of "; m += u.program;
+            }
+            if (!u.error) {
+                /* Raised, not thrown: no error, and a warning.             */
+                m += ": condition "; m += u.name;
+                m += " raised and not trapped (ignored)";
+                if (!u.description.empty()) { m += ": "; m += u.description; }
+                send_log(OORX_LOG_WARNING, m.data(), m.size());
+            } else {
                 snprintf(line, sizeof line, ": Error %d", u.rc);
                 m += line;
                 if (!u.text.empty()) { m += ": "; m += u.text; }
