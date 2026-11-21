@@ -118,10 +118,11 @@ file type for Oryx, the internal product name of what became ooRexx.
 Requirements:
 
 - Apache 2.4 with `apxs` (Debian/Ubuntu: `apache2-dev`);
-- ooRexx 5.3.0 (r13550 or later) with its API headers: the `APACHE`
-  environment of native programs is a `.CommandHandler`, new in 5.3.0, and
-  it is written with the THROW instruction, as the tests are with the CATCH
-  and FINALLY clauses; r13550 also has the fixes the tests run against
+- ooRexx 5.3.0 (r13572 or later, the trunk on 21 November 2026, which is
+  also RexxHTTP's minimum: it carries the Rexx Parser) with its API headers:
+  the `APACHE` environment of native programs is a `.CommandHandler`, new in
+  5.3.0, and it is written with the THROW instruction, as the tests are with
+  the CATCH and FINALLY clauses; it also has the fixes the tests run against
   (among them [#2135](https://sourceforge.net/p/oorexx/bugs/2135/): before
   it, an Apache started from another user's session, with that user's
   `XDG_RUNTIME_DIR`, made every new interpreter wait about 2 s for
