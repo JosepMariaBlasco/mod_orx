@@ -1,0 +1,130 @@
+# ooRexx built from SVN (main/trunk) at a pinned revision, cached per
+# operating system and revision: only the first run of a revision builds.
+#
+#   Linux:   installed in /usr (staged with DESTDIR in ~/oorexx-root, the
+#            cached copy, and copied to / on every run)
+#   macOS:   installed in ~/oorexx (bin, include, lib)
+#   Windows: installed in C:\oorexx, the installer's layout (rexx.exe at the
+#            top, the headers and import libraries in api\)
+#
+# Output `prefix`: the installation (/usr, ~/oorexx expanded, C:\oorexx).
+
+name: ooRexx from SVN
+description: Build ooRexx's trunk at a pinned revision, or take it from the cache
+
+inputs:
+  revision:
+    description: SVN revision of main/trunk
+    required: true
+
+outputs:
+  prefix:
+    description: Where ooRexx is installed
+    value: ${{ steps.where.outputs.prefix }}
+
+runs:
+  using: composite
+  steps:
+    - name: Where
+      id: where
+      shell: bash
+      run: |
+        case "$RUNNER_OS" in
+          Linux)   echo "cache=$HOME/oorexx-root" >> "$GITHUB_OUTPUT"
+                   echo "prefix=/usr" >> "$GITHUB_OUTPUT" ;;
+          macOS)   echo "cache=$HOME/oorexx" >> "$GITHUB_OUTPUT"
+                   echo "prefix=$HOME/oorexx" >> "$GITHUB_OUTPUT" ;;
+          Windows) echo 'cache=C:\oorexx' >> "$GITHUB_OUTPUT"
+                   echo 'prefix=C:\oorexx' >> "$GITHUB_OUTPUT" ;;
+        esac
+
+    - name: Cache
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.where.outputs.cache }}
+        key: oorexx-${{ runner.os }}-r${{ inputs.revision }}-${{ hashFiles('.github/actions/oorexx/action.yml') }}
+
+    - name: Build (Linux)
+      if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        REV: ${{ inputs.revision }}
+        DEST: ${{ steps.where.outputs.cache }}
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq subversion cmake g++
+        svn checkout -q -r "$REV" https://svn.code.sf.net/p/oorexx/code-0/main/trunk "$RUNNER_TEMP/oorexx-src"
+        cmake -S "$RUNNER_TEMP/oorexx-src" -B "$RUNNER_TEMP/oorexx-build" \
+              -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr > "$RUNNER_TEMP/oorexx-cmake.log"
+        grep 'Revision Number is' "$RUNNER_TEMP/oorexx-cmake.log"
+        cmake --build "$RUNNER_TEMP/oorexx-build" -j "$(nproc)" > "$RUNNER_TEMP/oorexx-make.log" 2>&1 ||
+            { tail -60 "$RUNNER_TEMP/oorexx-make.log"; exit 1; }
+        DESTDIR="$DEST" cmake --install "$RUNNER_TEMP/oorexx-build" > /dev/null
+
+    - name: Build (macOS)
+      if: runner.os == 'macOS' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        REV: ${{ inputs.revision }}
+        PREFIX: ${{ steps.where.outputs.prefix }}
+      run: |
+        command -v svn > /dev/null || brew install subversion > /dev/null
+        command -v cmake > /dev/null || brew install cmake > /dev/null
+        svn checkout -q -r "$REV" https://svn.code.sf.net/p/oorexx/code-0/main/trunk "$RUNNER_TEMP/oorexx-src"
+        cmake -S "$RUNNER_TEMP/oorexx-src" -B "$RUNNER_TEMP/oorexx-build" \
+              -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" > "$RUNNER_TEMP/oorexx-cmake.log"
+        grep 'Revision Number is' "$RUNNER_TEMP/oorexx-cmake.log"
+        cmake --build "$RUNNER_TEMP/oorexx-build" -j "$(sysctl -n hw.ncpu)" > "$RUNNER_TEMP/oorexx-make.log" 2>&1 ||
+            { tail -60 "$RUNNER_TEMP/oorexx-make.log"; exit 1; }
+        cmake --install "$RUNNER_TEMP/oorexx-build" > /dev/null
+
+    - name: Subversion (Windows)
+      if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        if (-not (Get-Command svn -ErrorAction SilentlyContinue)) {
+            choco install sliksvn -y --no-progress | Out-Null
+            "C:\Program Files\SlikSvn\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        }
+
+    - name: Build (Windows)
+      if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
+      shell: cmd
+      env:
+        REV: ${{ inputs.revision }}
+        PREFIX: ${{ steps.where.outputs.prefix }}
+      run: |
+        for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VS=%%i
+        if not defined VS (echo vswhere found no Visual C++ & exit /b 1)
+        call "%VS%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
+        svn checkout -q -r %REV% https://svn.code.sf.net/p/oorexx/code-0/main/trunk "%RUNNER_TEMP%\oorexx-src" || exit /b 1
+        cmake -G "NMake Makefiles" -S "%RUNNER_TEMP%\oorexx-src" -B "%RUNNER_TEMP%\oorexx-build" -DCMAKE_BUILD_TYPE=Release "-DCMAKE_INSTALL_PREFIX=%PREFIX%" > "%RUNNER_TEMP%\oorexx-cmake.log" || (type "%RUNNER_TEMP%\oorexx-cmake.log" & exit /b 1)
+        findstr /c:"Revision Number is" "%RUNNER_TEMP%\oorexx-cmake.log"
+        cmake --build "%RUNNER_TEMP%\oorexx-build" > "%RUNNER_TEMP%\oorexx-make.log" 2>&1 || (powershell -Command "Get-Content '%RUNNER_TEMP%\oorexx-make.log' -Tail 60" & exit /b 1)
+        cmake --install "%RUNNER_TEMP%\oorexx-build" > nul || exit /b 1
+
+    - name: Install (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo cp -a "${{ steps.where.outputs.cache }}/." /
+        sudo ldconfig
+
+    - name: Check the revision
+      shell: bash
+      env:
+        REV: ${{ inputs.revision }}
+        PREFIX: ${{ steps.where.outputs.prefix }}
+      run: |
+        case "$RUNNER_OS" in
+          Linux)   rexx=/usr/bin/rexx ;;
+          macOS)   rexx="$PREFIX/bin/rexx" ;;
+          Windows) rexx="$PREFIX/rexx.exe" ;;
+        esac
+        v=$("$rexx" -v | head -1 | tr -d '\r')
+        echo "::notice title=ooRexx from SVN::$v (cache hit: ${{ steps.cache.outputs.cache-hit == 'true' }})"
+        case "$v" in
+          *" r$REV"*) ;;
+          *) echo "::error title=ooRexx from SVN::expected r$REV, got: $v"; exit 1 ;;
+        esac

@@ -17,26 +17,31 @@ on:
       - 'tests/modrexx.ps1'
       - 'tests/modrexx/**'
       - '.github/workflows/windows.yml'
+      - '.github/actions/oorexx/**'
   workflow_dispatch:
 
 env:
-  OOREXX_FILES: https://sourceforge.net/projects/oorexx/files/oorexx/5.3.0beta
-  OOREXX_REV: "13568"
+  # ooRexx's trunk, built from SVN at this revision (.github/actions/oorexx).
+  OOREXX_REV: "13572"
 
 jobs:
   windows:
     name: Windows Server 2022, Apache Lounge
     runs-on: windows-2022
-    timeout-minutes: 25
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v5
 
-      - name: ooRexx, extracted from the installer
+      - name: ooRexx from SVN
+        id: oorexx
+        uses: ./.github/actions/oorexx
+        with:
+          revision: ${{ env.OOREXX_REV }}
+
+      - name: ooRexx
         shell: pwsh
         run: |
-          $oo = "$env:RUNNER_TEMP\oorexx"
-          curl.exe -sSfL -o "$env:RUNNER_TEMP\oorexx.exe" "$env:OOREXX_FILES/oorexx-5.3.0-$env:OOREXX_REV.windows.x86_64.exe/download"
-          7z x -y "-o$oo" "$env:RUNNER_TEMP\oorexx.exe" | Out-Null
+          $oo = "${{ steps.oorexx.outputs.prefix }}"
           "OOREXX=$oo" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           # Starts rxapi, outside the job mod_orx puts its host in.
           $v = (& "$oo\rexx.exe" -v | Select-Object -First 1)
